@@ -12,6 +12,8 @@ struct Solicitudes {
 	int ID;
 	int atendido;
 	int tipo;
+	int sitio;
+	int posicion;
 };
 
 struct Atendedores {
@@ -29,12 +31,18 @@ void manTerminacion(int sig);
 void *accionesAtendedor(void *arg);
 void *accionesCoordinadorSocial(void *arg);
 void *nuevaSolicitud(void *arg);
+void *accionesSolicitud(void *arg);
+int encuentraSitio();
+//void nuevaSolicitud(int sig);
+
 
 int main(void) {
 int i;
 struct sigaction ss = {0}, ss2 = {0};
 pthread_t atendedorIn, atendedorQR, atendedorPro, coordinador;
 srand(time(NULL));
+	contadorSolicitudes = 0;
+	contadorCultural = 0;
 	atendedores[0].tipo = 0;
 	atendedores[1].tipo = 1;
 	atendedores[2].tipo = 2;
@@ -74,7 +82,66 @@ int aleatorios(int min,int max) {
 }
 
 void manSolicitud(int sig){
+pthread_t t1;
+int posicion;
+struct Solicitudes solicitud;
+	if(contadorSolicitudes < 0){
+		posicion = encuentraSitio();
+sleep(1);
+		if(posicion == -1){
+			perror("error");
+			kill(getpid(), SIGINT);
+		}
+		contadorSolicitudes++;
+		solicitud.ID = contadorSolicitudes;
+		if(sig == SIGUSR1){
+			solicitud.tipo = 0;
+		}else if(sig == SIGUSR2){
+			solicitud.tipo = 1;
+		}
+		solicitud.sitio = 1;
+		solicitud.posicion = posicion;
+		colaSolicitudes[posicion] = solicitud;
+		pthread_create(&t1, NULL, accionesSolicitud, (void *) &solicitud); 
+	}else{
+		printf("Cola llena, solicitud ignorada\n");
+	}
+}
 
+//void nuevaSolicitud(int sig){
+/**pthread_t t1;
+int posicion;
+pthread_mutex_t semaforoSolicitudes;
+pthread_mutex_init(&semaforoSolicitudes, NULL);
+pthread_mutex_lock(&semaforoSolicitudes, NULL);
+if(contadorSolicitudes <15){
+	posicion = encuentraSitio();
+	contadorSolicitudes++;
+	colaSolicitudes[posicion].ID = contadorSolicitudes;
+	colaSolicitudes[posicion].atendido = 0;
+	colaSolicitudes[posicion].sitio 
+}else{
+
+}
+int posicion;*/
+//}
+
+int encuentraSitio(){
+int i = 0, encontrado = 0 , posicion = -1;
+	while((i < 15) && (encontrado == 0)){
+		if(colaSolicitudes[i].sitio == 0){
+			encontrado = 1;
+			posicion = i;
+		}	
+		i++;
+	}
+return posicion;
+}
+
+void *accionesSolicitud(void *arg){
+struct Solicitudes *p = (struct Solicitudes *)arg;
+sleep(1);
+	printf("Solicitud %d\n", p->ID);
 }
 
 void manTerminacion(int sig){
