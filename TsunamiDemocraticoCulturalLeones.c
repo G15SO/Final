@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-<<<<<<< HEAD
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -8,37 +7,80 @@
 #include <signal.h>
 #include <time.h>
 
-struct Solicitudes() {
+int contadorSolicitudes, contadorCultural;
+struct Solicitudes {
 	int ID;
 	int atendido;
 	int tipo;
 };
-Solicitudes colaSolicitudes[15];
-Solicitudes colaCultural[4];
-int contadorSolicitudes, contadorCultural;
-struct Atendedores() {
-	int ID;
+
+struct Atendedores {
 	int tipo;
 	int estado;
 };
-Atendedores atendedores[3];
 
-void aleatorios(int min, int max);
+struct Solicitudes colaSolicitudes[15];
+struct Solicitudes colaCultural[4];
+struct Atendedores atendedores[3];
+
+int aleatorios(int min, int max);
+void manSolicitud(int sig);
+void manTerminacion(int sig);
 void *accionesAtendedor(void *arg);
 void *accionesCoordinadorSocial(void *arg);
 void *nuevaSolicitud(void *arg);
 
 int main(void) {
-	pthread_t atendedor_1, atendedor_2, atendedor_3,coordinador;
-
-	pthread_create (&atendedor_1, NULL, NULL);
-	pthread_create (&atendedor_2, NULL, NULL);
-	pthread_create (&atendedor_3, NULL, NULL);
-	pthread_create (&coordinador, NULL, NULL);
+int i;
+struct sigaction ss = {0}, ss2 = {0};
+pthread_t atendedorIn, atendedorQR, atendedorPro, coordinador;
+srand(time(NULL));
+	atendedores[0].tipo = 0;
+	atendedores[1].tipo = 1;
+	atendedores[2].tipo = 2;
+	for(i = 0; i<3; i++){
+		atendedores[i].estado = 0;
+	}	
+	//tratamiento de SIGUSR1 para crear un nuevo hilo de tipo invitacion
+	ss.sa_handler = manSolicitud;
+	if(sigaction(SIGUSR1,&ss, NULL) == -1){
+		perror("Error\n");
+		exit(-1);
+	}
+	//tratamiento de SIGUSR2 para crear un nuevo hilo de tipo qr
+	if(sigaction(SIGUSR2,&ss, NULL) == -1){
+		perror("Error\n");
+		exit(-1);
+	}
+	//tratamiento de SIGINT para finalizar el programa matando a todos los hilos
+	ss2.sa_handler = manTerminacion;
+	if(sigaction(SIGINT,&ss2, NULL) == -1){
+		perror("Error\n");
+		exit(-1);
+	}
+	//creacion de los hilos atendedores y coordinador	
+	pthread_create(&atendedorIn, NULL, accionesAtendedor, (void *) &atendedores[0].tipo);
+	pthread_create(&atendedorQR, NULL, accionesAtendedor, (void *) &atendedores[1].tipo);
+	pthread_create(&atendedorPro, NULL, accionesAtendedor, (void *) &atendedores[2].tipo);
+	pthread_create(&coordinador, NULL, accionesCoordinadorSocial, NULL);
+	//espera infinita a señales
+	while(1){
+		pause();
+	}
 }
-void aleatorios(int main,int max) {
+
+int aleatorios(int min,int max) {
 	return rand()%(max-min+1)+min;
 }
+
+void manSolicitud(int sig){
+
+}
+
+void manTerminacion(int sig){
+exit(0);
+}
+
 void *accionesAtendedor(void *arg) {
 	/**
 	 * Buscar la primera solicitud que es la que lleva mas tiempo esperando
@@ -65,6 +107,7 @@ void *accionesAtendedor(void *arg) {
 		toma de cafe
 		Vuelta a comprobar la solicitud con prioridad.
 	*/
+	printf("atendedor %d\n",*(int *) arg); 
 }
 void *accionesCoordinadorSocial(void *arg) {
 	/**
@@ -82,7 +125,4 @@ void *nuevaSolicitud(void *arg) {
 		if(espaciooK) -> se añade solicitud y contador+1
 	 */
 }
-=======
 
-
->>>>>>> 6ef0dfcffe0a8ecb20c610a05ce8b0f21cf667fd
