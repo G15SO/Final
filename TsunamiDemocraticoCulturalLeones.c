@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <time.h>
 
+pthread_mutex_t nuevasSolicitudes;
 int contadorSolicitudes, contadorCultural;
 struct Solicitudes {
 	int ID;
@@ -33,7 +34,7 @@ void *accionesCoordinadorSocial(void *arg);
 void *nuevaSolicitud(void *arg);
 void *accionesSolicitud(void *arg);
 int encuentraSitio();
-//void nuevaSolicitud(int sig);
+
 
 
 int main(void) {
@@ -41,6 +42,7 @@ int i;
 struct sigaction ss = {0}, ss2 = {0};
 pthread_t atendedorIn, atendedorQR, atendedorPro, coordinador;
 srand(time(NULL));
+	pthread_mutex_init(&nuevasSolicitudes, NULL);
 	contadorSolicitudes = 0;
 	contadorCultural = 0;
 	atendedores[0].tipo = 0;
@@ -83,48 +85,37 @@ int aleatorios(int min,int max) {
 
 void manSolicitud(int sig){
 pthread_t t1;
-int posicion;
-struct Solicitudes solicitud;
-	if(contadorSolicitudes < 0){
-		posicion = encuentraSitio();
-sleep(1);
-		if(posicion == -1){
-			perror("error");
-			kill(getpid(), SIGINT);
-		}
+	pthread_create(&t1, NULL, nuevaSolicitud, (void *) &sig);
+
+}
+
+//¿El mutex va desbloqueando segun FIFO o hay que regularlo?
+void *nuevaSolicitud(void *arg) {
+int posicion = 0, signal = -1;
+if(*(int *)arg == SIGUSR1){
+ signal = 1;
+}
+if(*(int *)arg == SIGUSR2){
+ signal = 2;
+}
+	pthread_mutex_lock(&nuevasSolicitudes);
+	if(contadorSolicitudes < 15){
 		contadorSolicitudes++;
-		solicitud.ID = contadorSolicitudes;
-		if(sig == SIGUSR1){
-			solicitud.tipo = 0;
-		}else if(sig == SIGUSR2){
-			solicitud.tipo = 1;
+		posicion = encuentraSitio();
+		if(posicion == -1){
+			exit(-1);		
 		}
-		solicitud.sitio = 1;
-		solicitud.posicion = posicion;
-		colaSolicitudes[posicion] = solicitud;
-		pthread_create(&t1, NULL, accionesSolicitud, (void *) &solicitud); 
+		colaSolicitudes[posicion].ID = contadorSolicitudes;
+		colaSolicitudes[posicion].sitio = 1;
+		colaSolicitudes[posicion].atendido = 0;
+		colaSolicitudes[posicion].tipo = signal;
+		colaSolicitudes[posicion].posicion = posicion;
+		printf("Solicitud recibida %d, de tipo %d\n",colaSolicitudes[posicion].ID, colaSolicitudes[posicion].tipo);
 	}else{
-		printf("Cola llena, solicitud ignorada\n");
+		printf("Señal ignorada\n");
 	}
+	pthread_mutex_unlock(&nuevasSolicitudes);
 }
-
-//void nuevaSolicitud(int sig){
-/**pthread_t t1;
-int posicion;
-pthread_mutex_t semaforoSolicitudes;
-pthread_mutex_init(&semaforoSolicitudes, NULL);
-pthread_mutex_lock(&semaforoSolicitudes, NULL);
-if(contadorSolicitudes <15){
-	posicion = encuentraSitio();
-	contadorSolicitudes++;
-	colaSolicitudes[posicion].ID = contadorSolicitudes;
-	colaSolicitudes[posicion].atendido = 0;
-	colaSolicitudes[posicion].sitio 
-}else{
-
-}
-int posicion;*/
-//}
 
 int encuentraSitio(){
 int i = 0, encontrado = 0 , posicion = -1;
@@ -185,11 +176,5 @@ void *accionesCoordinadorSocial(void *arg) {
 	duracion de la actividad -> 3 segundos
 	se informa de que han teminado y se resetea la cola
 	*/
-}
-void *nuevaSolicitud(void *arg) {
-	/**
-	Se comprueba si hay espacio
-		if(espaciooK) -> se añade solicitud y contador+1
-	 */
 }
 
