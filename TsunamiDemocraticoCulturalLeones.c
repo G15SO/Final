@@ -217,14 +217,35 @@ void *accionesAtendedor(void *arg) {
 	sleep(6);
 	colaSolicitudes[0].atendido = 1;
 }
+/**
+//Aqui se realizaran las actividades culturales de aquellas señales que lo soliciten cuando haya hueco y no se este realizando una
 void *accionesCoordinadorSocial(void *arg) {
-	/**
-	Se espera por 4 listos(señales)
-	contador +1;
-	cuando haya cuatro -> Cierre de cola cultural
-	Aviso de comienzo
-	duracion de la actividad -> 3 segundos
-	se informa de que han teminado y se resetea la cola
-	*/
+	//Si recibe la señal SIGPIPE(por poner algo) la cola cultural añadira una nueva solicitud a la cola
+	if(sig = SIGPIPE){
+		printf("Señal recibida");
+		colaCultural++;
+		//Si la cola no esta llena se informara de cuantas señales hay 
+		pthread_mutex_lock(&mutexSolicitudes);
+		if(colaCultural<4) {
+			printf("Hay %d de señales listas\n",colaCultural);
+		//Si la cola esta llena se avisara y compenzara la actividad que durara 3 segundos y al terminar avisara y vaciara la cola solicitudes
+		pthread_mutex_lock(&mutexSolicitudes);
+		} if else(colaCultural==4) {
+			printf("La actividad esta llena\n");
+			printf("La actividad cultural comienza\n");
+			sleep(3);
+			printf("La actividad cultural ha terminado\n");
+			colaCultural=0;	
+		//Si la cola esta llena se desecharan las solicitudes nuevas
+		}else{
+			printf("Señal desechada la actividad esta llena y ejecutandose\n");
+		}
+		pthread_mutex_unlock(&mutexSolicitudes);
+	//No hay solicitudes de entrar a la cola para la actividad
+	}else{
+		printf("");
+	}
+	
 }
+*/
 
