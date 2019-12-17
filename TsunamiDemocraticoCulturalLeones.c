@@ -7,7 +7,7 @@
 #include <signal.h>
 #include <time.h>
 
-pthread_mutex_t mutexSolicitudes; 
+pthread_mutex_t mutexSolicitudes,mutexCultural; 
 int contadorSolicitudes, contadorCultural, solicitudesEncoladas;
 
 /**
@@ -143,9 +143,9 @@ return posicion;
 }
 
 void *accionesSolicitud(void *arg){
-//continua vale 0 si el hilo puede continuar o 1 si no puede.
-int pos = *(int *)arg, continua, aleatorio;
-sleep(4);
+	//Continua vale 0 si el hilo puede continuar o 1 si no puede.
+	int pos = *(int *)arg, continua, aleatorio;
+	sleep(4);
 	if(colaSolicitudes[pos].atendido == 0){
 		do{
 			if(colaSolicitudes[pos].tipo == 1){
@@ -175,12 +175,63 @@ sleep(4);
 		}while(colaSolicitudes[pos].atendido == 0);
 	}
 	printf("El hilo %d fue atendido\n",colaSolicitudes[pos].ID);
+
+
+
+	//Si ha sido atendido es decir 2 decide si va o no a una actividad seria asi??
+	if(colaSolicitudes[pos].atendido == 2){
+		aleatorio = aleatorios(0,1)
+		//Si es 0 va a la actividad 
+		if(aleatorio == 0){
+			whil(1){
+			//Si hay menos de 4 en la actividad cuando llegue uno pasara de la cola de solicitudes a la cultural e incrementara el valor en 1 de el numero de elementos en la actividad
+			do{
+				colaSolicitudes[pos] = colaCultural[pos];
+				contadorCultural++;
+				//Cuando sean 4 el ultimo avisara al coordinador y ¿libera espacio en la cola solicitudes?
+				if(contadorCultural == 4){
+					c_signal(coordinador); //Aviso coordinador que ya son 4
+					c_wait(coordinadorlisto); //Espera a recibir que el coordinador esta listo
+					sleep(3); //Duracion actividad
+					c.signal(actividaddone); //Aviso coordinador actividad ha acabado
+				}else{
+					printf("Hay %d de 4 huecos llenos en la actividad",contadorCultural
+			}while(contadorCultural < 4)
+			sleep(3);
+			}
+					
+		//Si es 1 el hilo no va a la actividad, libera su hueco en la cola y se va
+		}else{
+			printf("El hilo %d se va\n",colaSolicitudes[pos].ID);
+			pthread_mutex_lock(&mutexSolicitudes);
+			colaSolicitudes[pos].sitio = 0;
+			solicitudesEncoladas--;
+			pthread_mutex_unlock(&mutexSolicitudes);
+			pthread_exit(NULL);
+		}
+
+
 	//Esperar a que acaben de atenderle seria asi?
 	while(colaSolicitudes[pos].atendido == 1){
 		sleep(2);
 	}
 
 }
+
+
+void *accionesCoordinadorSocial(void *arg) {
+	while(1){
+		c_wait(coordinador); //Espera a que se le avise que son 4
+		pthread_mutex_lock(&mutexCultural);
+		c_signal(coordinadorlisto); //Avisa de que ya esta listo
+		c_wait(actividaddone); //Espera a que termine la actividad
+		pthread_mutex_lock(&mutexCultural);
+	}
+	
+}
+
+
+*/
 
 void manTerminacion(int sig){
 exit(0);
@@ -217,35 +268,3 @@ void *accionesAtendedor(void *arg) {
 	sleep(6);
 	colaSolicitudes[0].atendido = 1;
 }
-/**
-//Aqui se realizaran las actividades culturales de aquellas señales que lo soliciten cuando haya hueco y no se este realizando una
-void *accionesCoordinadorSocial(void *arg) {
-	//Si recibe la señal SIGPIPE(por poner algo) la cola cultural añadira una nueva solicitud a la cola
-	if(sig = SIGPIPE){
-		printf("Señal recibida");
-		colaCultural++;
-		//Si la cola no esta llena se informara de cuantas señales hay 
-		pthread_mutex_lock(&mutexSolicitudes);
-		if(colaCultural<4) {
-			printf("Hay %d de señales listas\n",colaCultural);
-		//Si la cola esta llena se avisara y compenzara la actividad que durara 3 segundos y al terminar avisara y vaciara la cola solicitudes
-		pthread_mutex_lock(&mutexSolicitudes);
-		} if else(colaCultural==4) {
-			printf("La actividad esta llena\n");
-			printf("La actividad cultural comienza\n");
-			sleep(3);
-			printf("La actividad cultural ha terminado\n");
-			colaCultural=0;	
-		//Si la cola esta llena se desecharan las solicitudes nuevas
-		}else{
-			printf("Señal desechada la actividad esta llena y ejecutandose\n");
-		}
-		pthread_mutex_unlock(&mutexSolicitudes);
-	//No hay solicitudes de entrar a la cola para la actividad
-	}else{
-		printf("");
-	}
-	
-}
-*/
-
