@@ -9,9 +9,9 @@
 
 pthread_mutex_t mutexSolicitudes, mutexCultural; 
 pthread_cond_t condCoordinador, condInicioActi;
-int contadorSolicitudes, contadorCultural, solicitudesEncoladas;
+int contadorSolicitudes, contadorCultural, solicitudesEncoladas, fin;
 
-/**
+/*
 *Structura que emula una solicitud a la aplicacion.
 *ID: corresponde con el ID que tendra en la aplicacion.
 *atendido: vale 0 si no esta atendido, 1 si si lo esta siendo o 2 si ya ha sido atendido.
@@ -44,7 +44,7 @@ void *accionesAtendedor(void *arg);
 void *accionesCoordinadorSocial(void *arg);
 void *accionesSolicitud(void *arg);
 int encuentraSitio();
-
+void manFin(int sig);
 
 
 int main(void) {
@@ -59,6 +59,7 @@ srand(time(NULL));
 	contadorSolicitudes = 0;
 	solicitudesEncoladas = 0;
 	contadorCultural = 0;
+	fin = 0;
 	atendedores[0].tipo = 0;
 	atendedores[1].tipo = 1;
 	atendedores[2].tipo = 2;
@@ -254,7 +255,16 @@ void *accionesCoordinadorSocial(void *arg) {
 
 
 void manTerminacion(int sig){
-exit(0);
+	struct sigaction ss = {0};
+	ss.sa_handler = manFin;
+	if(sigaction(SIGUSR1,&ss,NULL) == -1){
+		perror("");
+		exit(-1);
+	}
+}
+
+void manFin(int sig){
+printf("señal no admitida\n");
 }
 
 void *accionesAtendedor(void *arg) {
