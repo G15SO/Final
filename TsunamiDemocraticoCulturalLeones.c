@@ -26,13 +26,12 @@ struct Solicitudes
 	int tipo;
 	int sitio;
 	int posicion;
-	//pthread_t thread;
 };
 
 struct Atendedores
 {
 	int tipo;
-	int estado;
+	int solicitudesAtendidas;
 };
 
 struct Solicitudes colaSolicitudes[15];
@@ -47,6 +46,8 @@ void *accionesCoordinadorSocial(void *arg);
 void *accionesSolicitud(void *arg);
 int encuentraSitio();
 void manFin(int sig);
+int buscarSolicitud(int tipoAtendedor);
+int buscaMasAntigua(int solicitudes[15], int contador);
 
 int main(void)
 {
@@ -67,7 +68,7 @@ int main(void)
 	atendedores[2].tipo = 2;
 	for (i = 0; i < 3; i++)
 	{
-		atendedores[i].estado = 0;
+		atendedores[i].solicitudesAtendidas = 0;
 	}
 	//tratamiento de SIGUSR1 para crear un nuevo hilo de tipo invitacion
 	ss.sa_handler = manSolicitud;
@@ -90,9 +91,9 @@ int main(void)
 		exit(-1);
 	}
 	//creacion de los hilos atendedores y coordinador
-	pthread_create(&atendedorIn, NULL, accionesAtendedor, (void *)&atendedores[0].tipo);
-	pthread_create(&atendedorQR, NULL, accionesAtendedor, (void *)&atendedores[1].tipo);
-	pthread_create(&atendedorPro, NULL, accionesAtendedor, (void *)&atendedores[2].tipo);
+	pthread_create(&atendedorIn, NULL, accionesAtendedor, (void *)&atendedores[0]);
+	pthread_create(&atendedorQR, NULL, accionesAtendedor, (void *)&atendedores[1]);
+	pthread_create(&atendedorPro, NULL, accionesAtendedor, (void *)&atendedores[2]);
 	pthread_create(&coordinador, NULL, accionesCoordinadorSocial, NULL);
 	//espera infinita a señales
 	while (1)
@@ -138,12 +139,9 @@ void manSolicitud(int sig)
 		colaSolicitudes[posicion].atendido = 0;
 		colaSolicitudes[posicion].tipo = signal;
 		colaSolicitudes[posicion].posicion = posicion;
-		//pthread_create(&colaSolicitudes[posicion].thread ,NULL ,accionesSolicitud, (void *)&posicion);
 		pthread_create(&t1, NULL, accionesSolicitud, (void *)&colaSolicitudes[posicion].posicion);
 		printf("Solicitud recibida %d, de tipo %d\n", colaSolicitudes[posicion].ID, colaSolicitudes[posicion].tipo);
-	}
-	else
-	{
+	}else{
 		printf("Señal ignorada\n");
 	}
 	pthread_mutex_unlock(&mutexSolicitudes);
@@ -309,72 +307,111 @@ void manFin(int sig)
 	printf("señal no admitida\n");
 }
 
+int buscarSolicitud(int tipoAtendedor){
+	int pos = 0, encontrado = 0, resultado = -1, tipo1[15], tipo2[15], i=0, contador1 = 0, contador2 = 0, aux;
+	for(i;i<15;i++){
+		tipo1[i] = 0;
+		tipo2[i] = 0;
+	}
+	for(i=0;i<15;i++){
+		if((colaSolicitudes[i].sitio == 1) && (colaSolicitudes[i].atendido == 0)){
+			if(colaSolicitudes[i].tipo == 1){
+				tipo1[contador1] = i;
+				contador1++;
+			}else{
+				tipo2[contador2] = i;
+				contador2++;
+			}
+		}
+	}
+	if((contador1 != 0) || (contador2 != 0)){
+		if(tipoAtendedor == 1){
+			if(contador1 != 0){
+				resultado = buscaMasAntigua(tipo1, contador1);
+			}else{ 
+				resultado = buscaMasAntigua(tipo2, contador2);
+			}
+		}else if(tipoAtendedor == 2){
+			if(contador2 != 0){
+				resultado = buscaMasAntigua(tipo2, contador2);
+			}else{
+				resultado = buscaMasAntigua(tipo1, contador1);
+			}
+		}else{
+			if(contador1 != 0){
+				resultado = buscaMasAntigua(tipo1, contador1);
+			}
+			if(contador2 != 0){
+				if(contador1 == 0){
+					resultado = buscaMasAntigua(tipo2, contador2);
+				}else{
+					aux = buscaMasAntigua(tipo2, contador2);
+					if(aux < resultado){
+						resultado  = aux;
+					}
+				}
+			}	
+		}
+	}
+	return resultado;
+}
+
+int buscaMasAntigua(int solicitudes[15], int contador){
+	int antiguo = colaSolicitudes[solicitudes[0]].ID, i, posicion = solicitudes[0];
+	for(i = 0; i<contador;i++){
+		if(colaSolicitudes[solicitudes[i]].ID < antiguo){
+			antiguo = colaSolicitudes[solicitudes[i]].ID;
+			posicion = solicitudes[i];
+		}
+	}
+	return posicion;
+}
+
 void *accionesAtendedor(void *arg)
 {
-	/**
-	int posicion = 0, contadorUsuarios = 0, solicitudesAtendidas = 0, tipoAtencion = 0, tiempoAtencion = 0;
+	struct Atendedores atendedor = *(struct Atendedores *)arg;
+	int posicion = 0, tipoAtencion = 0, tiempoAtencion = 0;
 	do
 	{
 		pthread_mutex_lock(&mutexSolicitudes);
-		for (int i = 0, i < contadorSolicitudes; i++)
-		{
-			//Busco la solicitud que mas tiempo lleva esperando
-			posicion = colaSolicitudes[0].id;
-			if (colaSolicitudes[i].id < posicion)
-			{
-				posicion = colaSolicitudes[i].id;
+		posicion = buscarSolicitud(atendedor.tipo);
+		if(posicion != -1){
+			colaSolicitudes[posicion].atendido = 1;
+		}
+		pthread_mutex_unlock(&mutexSolicitudes);
+		if(posicion != -1){
+			atendedor.solicitudesAtendidas = atendedor.solicitudesAtendidas +1;
+			//Calculo el tipo de atencion y el tiempo de atencion
+			tipoAtencion = aleatorios(1, 100);
+			if (tipoAtencion <= 70)
+			{ //Atencion correcta
+				tiempoAtencion = aleatorios(1, 4);
 			}
-			//Falta comprobar el tipo
-
+			else if (tipoAtencion > 70 && tipoAtencion <= 90)
+			{ //Errores en datos personales
+				tiempoAtencion = aleatorios(2, 6);
+			}
+			else
+			{ //Antecedentes
+				tiempoAtencion = aleatorios(6, 10);
+			}
+			//Dormimos el tiempo de atencion
+			sleep(tiempoAtencion);
+			//Cambiamos el flag de atendido
+			pthread_mutex_lock(&mutexSolicitudes);
+				if(tipoAtencion > 90){
+					colaSolicitudes[posicion].atendido = 4;
+				}else{
+					colaSolicitudes[posicion].atendido = 2;
+				}
 			pthread_mutex_unlock(&mutexSolicitudes);
+			//Miramos si necesita tomar cafe
+			if (atendedor.solicitudesAtendidas == 5){
+				sleep(10);
+				atendedor.solicitudesAtendidas = 0;
+			}
 		}
-		//Calculo el tipo de atencion y el tiempo de atencion
-		tipoAtencion = aleatorios(1, 100);
-		if (tipoAtencion <= 70)
-		{ //Atencion correcta
-			tiempoAtencion = aleatorios(1, 4);
-		}
-		else if (tipoAtencion > 70 && tipoAtencion <= 80)
-		{ //Errores en datos personales
-			tiempoAtencion = aleatorios(2, 6);
-		}
-		else
-		{ //Antecedentes
-			tiempoAtencion = aleatorios(6, 10);
-		}
-		//Cambiamos el flag de atendido
-		pthread_mutex_lock(&mutexSolicitudes);
-		colaSolicitudes[posicion].atendido = 1;
-		pthread_mutex_unlock(&mutexSolicitudes);
-		//Dormimos el tiempo de atencion
-		sleep(tiempoAtencion);
-		//Cambiamos el flag de atendido
-		pthread_mutex_lock(&mutexSolicitudes);
-		colaSolicitudes[posicion].atendido = 2;
-		pthread_mutex_unlock(&mutexSolicitudes);
-		//Miramos si necesita tomar cafe
-		if (solicitudesAtendidas == 5)
-			sleep(10);
+		sleep(1);
 	//Si no hay usuarios espero 1 segundo y vuelvo a buscar la primera solicitud
-	}while(contadorSolicitudes!=0)
-	sleep(1);
-	*/
-	while (1)
-	{
-		sleep(3);
-		pthread_mutex_lock(&mutexSolicitudes);
-		for (int i = 0; i < contadorSolicitudes; i++)
-		{
-			colaSolicitudes[i].atendido = 1;
-		}
-		pthread_mutex_unlock(&mutexSolicitudes);
-		sleep(4);
-		pthread_mutex_lock(&mutexSolicitudes);
-		for (int i = 0; i < contadorSolicitudes; i++)
-		{
-			colaSolicitudes[i].atendido = 2;
-		}
-		pthread_mutex_unlock(&mutexSolicitudes);
-	}
-	
-	}
+	}while(1);
+}
