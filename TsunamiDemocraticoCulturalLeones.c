@@ -5,13 +5,14 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
+#include <string.h>
 #include <time.h>
 
 
-pthread_mutex_t mutexSolicitudes, mutexCultural;
+pthread_mutex_t mutexSolicitudes, mutexCultural, mutexLogs;
 pthread_cond_t condCoordinador, condInicioActi;
 int contadorSolicitudes, contadorCultural, solicitudesEncoladas, fin, estadoCultural;
-
+FILE *logFile;
 /*
 *Structura que emula una solicitud a la aplicacion.
 *ID: corresponde con el ID que tendra en la aplicacion.
@@ -60,6 +61,8 @@ int encuentraSitio();
 void manFin(int sig);
 int buscarSolicitud(int tipoAtendedor);
 int buscaMasAntigua(int solicitudes[15], int contador);
+void creaIdentificador(char *id, int num);
+void writeLogMessage(char *id, char *msg);
 
 //Funcion principal
 int main(int argc, char argv[]){
@@ -69,6 +72,7 @@ int main(int argc, char argv[]){
 	//Inicializacion de mutex y variables condicion
 	pthread_mutex_init(&mutexSolicitudes, NULL);
 	pthread_mutex_init(&mutexCultural, NULL);
+	pthread_mutex_init(&mutexLogs, NULL);
 	pthread_cond_init(&condCoordinador, NULL);
 	pthread_cond_init(&condInicioActi, NULL);
 	//Creacion e inicializacion de los atendedores
@@ -77,6 +81,22 @@ int main(int argc, char argv[]){
 		atendedores[i].tipo = i;
 		atendedores[i].ID = i+1;
 		atendedores[i].solicitudesAtendidas = 0;
+	}
+	//inicializacion cola solicitudes
+	for(i = 0; i<15; i++){
+		colaSolicitudes[i].ID = 0;
+		colaSolicitudes[i].tipo = 0;
+		colaSolicitudes[i].atendido = 0;
+		colaSolicitudes[i].sitio = 0;
+		colaSolicitudes[i].posicion = 0;
+	}
+	//inicializacion cola cultural
+	for(i = 0; i<4; i++){
+		colaCultural[i].ID = 0;
+		colaCultural[i].tipo = 0;
+		colaCultural[i].atendido = 0;
+		colaCultural[i].sitio = 0;
+		colaCultural[i].posicion = 0;
 	}
 	//Inicializacion variables globales
 	contadorSolicitudes = 0;
@@ -146,9 +166,8 @@ void manSolicitud(int sig){
 		colaSolicitudes[posicion].tipo = signal;
 		colaSolicitudes[posicion].posicion = posicion;
 		pthread_create(&t1, NULL, accionesSolicitud, (void *)&colaSolicitudes[posicion].posicion);
-		printf("Solicitud recibida %d, de tipo %d\n", colaSolicitudes[posicion].ID, colaSolicitudes[posicion].tipo);
 	}else{
-		printf("Señal ignorada\n");
+		printf("Señal ignorada por falta de espacio\n");
 	}
 	pthread_mutex_unlock(&mutexSolicitudes);
 }
@@ -173,11 +192,25 @@ int encuentraSitio(){
 *La solicitud encolada es atendida por un atendedor y si es atendida correctamente puede o no solicitar unirse a una actividad,
 *si decide unirse realizara la actividad y finalizara.
 */
-void *accionesSolicitud(void *arg)
-{
+void *accionesSolicitud(void *arg){
 	//Continua vale 0 si el hilo puede continuar o 1 si no puede.
 	int pos = *(int *)arg, continua, aleatorio, actividad = 0, ID;
+	char identificador[30], mensaje[200];
 	ID = colaSolicitudes[pos].ID;
+	//Creamos mensajes de los logs
+	strcpy(identificador, "Solicitud_");
+	creaIdentificador(identificador, ID);
+	if(colaSolicitudes[pos].tipo == 1){
+		strcpy(mensaje, "de tipo invitación ha sido recibida.");
+	}else{
+		strcpy(mensaje, "de tipo QR ha sido recibida.");
+	}
+	printf("%s: %s\n",identificador, mensaje);
+	//Cogemos el mutex de los logs y escribimos en el fichero
+	pthread_mutex_lock(&mutexLogs);
+	writeLogMessage(identificador, mensaje);
+	pthread_mutex_unlock(&mutexLogs);
+	//Dormimos 4 segundos antes de comprobar si hemos sido atendidos
 	sleep(4);
 	//Si no ha sido atendido entra en el if
 	if (colaSolicitudes[pos].atendido == 0){
@@ -187,21 +220,27 @@ void *accionesSolicitud(void *arg)
 			if (colaSolicitudes[pos].tipo == 1){
 				aleatorio = aleatorios(1, 100);
 				if (aleatorio <= 10){
+					strcpy(mensaje, "abandona la cola por cansarse de esperar.");
 					continua = 1;
 				}
 			}else{
 				aleatorio = aleatorios(1, 100);
 				if (aleatorio <= 30){
+					strcpy(mensaje, "abandona la cola por no considerarse muy fiable.");
 					continua = 1;
 				}
 			}
 			aleatorio = aleatorios(1, 100);
 			if (aleatorio <= 15){
+				strcpy(mensaje, "es eliminada de la cola por decision de la aplicacion.");
 				continua = 1;
 			}
 			//Si debe descartarse abandona la cola, sino duerme 4 segundos y vuelva a comprobar si ha sido atendido
 			if (continua == 1){
-				printf("El hilo %d se va\n", colaSolicitudes[pos].ID);
+				printf("%s: %s\n", identificador, mensaje);
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
 				pthread_mutex_lock(&mutexSolicitudes);
 				colaSolicitudes[pos].sitio = 0;
 				solicitudesEncoladas--;
@@ -238,6 +277,11 @@ void *accionesSolicitud(void *arg)
 					pthread_mutex_lock(&mutexSolicitudes);
 					colaSolicitudes[pos].sitio = 0;
 					pthread_mutex_unlock(&mutexSolicitudes);
+					strcpy(mensaje, "esta lista para comenzar la actividad.");
+					pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+					pthread_mutex_unlock(&mutexLogs);
+					printf("%s: %s\n",identificador, mensaje);
 					//Si es el 4 hilo avisa al coordinador de que empiece la actividad
 					if (contadorCultural == 4){
 						pthread_cond_signal(&condCoordinador);
@@ -248,10 +292,14 @@ void *accionesSolicitud(void *arg)
 					contadorCultural--;
 					colaCultural[contadorCultural].sitio = 0;
 					//Si es el ultimo avisa al coordinador de que se termino la actividad
+					strcpy(mensaje, "ha terminado la actividad.");
+					pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+					pthread_mutex_unlock(&mutexLogs);
+					printf("%s: %s\n",identificador, mensaje);
 					if (contadorCultural == 0){
 						pthread_cond_signal(&condCoordinador);
 					}
-					printf("El hilo %d deja la actividad\n", ID);
 					pthread_mutex_unlock(&mutexCultural);
 				//Si la lista no esta libre duerme 3 segundos y lo vuelva a intentar
 				}else{
@@ -261,10 +309,18 @@ void *accionesSolicitud(void *arg)
 			}while (actividad == 0);
 		//Si es 1 el hilo no va a la actividad, libera su hueco en la cola y se va
 		}else{ 
-			printf("El hilo %d no se ha unido a ninguna actividad y se va\n", ID);
+			strcpy(mensaje, "ha decidido no unirse a una actividad.");
+			pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+			pthread_mutex_unlock(&mutexLogs);
+			printf("%s: %s\n",identificador, mensaje);
 		}
 	}
-	printf("->Fin hilo %d\n", ID);
+	strcpy(mensaje, " abandona el programa.");
+	pthread_mutex_lock(&mutexLogs);
+	writeLogMessage(identificador, mensaje);
+	pthread_mutex_unlock(&mutexLogs);
+	printf("%s: %s\n",identificador, mensaje);
 	pthread_mutex_lock(&mutexSolicitudes);
 	colaSolicitudes[pos].sitio = 0;
 	solicitudesEncoladas--;
@@ -276,16 +332,34 @@ void *accionesSolicitud(void *arg)
 *Funcion que emula el comportamiento del coordinador, gestionando una actividad cultural.
 */
 void *accionesCoordinadorSocial(void *arg){
+	char identificador[30], mensaje[200];
+	strcpy(identificador, "Coordinador");
 	while (1){
 		pthread_mutex_lock(&mutexCultural);
-		pthread_cond_wait(&condCoordinador, &mutexCultural); //Espera a que se le avise que son 4
-		estadoCultural = 1;  
-		printf("Comienza la actividad\n");
+		//Espera a que se le avise que son 4
+		pthread_cond_wait(&condCoordinador, &mutexCultural);
+		//Cerramos la cola cultural con la variable candado
+		estadoCultural = 1;
+		//sleep de 1 segundo para dar tiempo a que el que ha avisado a el coordinador pueda entrar en el wait
 		sleep(1);
-		pthread_cond_broadcast(&condInicioActi); //Avisa de que ya esta listo
-		pthread_cond_wait(&condCoordinador, &mutexCultural); //Espera a que termine la actividad
+		//Escribimos en el log que comienza la actividad
+		strcpy(mensaje, "comienza la actividad cultural.");
+		pthread_mutex_lock(&mutexLogs);
+		writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+		//Avisa de que ya esta listo
+		pthread_cond_broadcast(&condInicioActi); 
+		//Espera a que termine la actividad
+		pthread_cond_wait(&condCoordinador, &mutexCultural);
+		//Una vez terminada se abre la cola de nuevo
 		estadoCultural = 0;
-		printf("Actividad terminada\n");
+		//Escribimos en el log que la actividad cultural ha terminado
+		strcpy(mensaje, "la actividad cultural ha terminado.");
+		pthread_mutex_lock(&mutexLogs);
+		writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
 		pthread_mutex_unlock(&mutexCultural);
 	}
 }
@@ -390,14 +464,46 @@ int buscaMasAntigua(int solicitudes[15], int contador){
 void *accionesAtendedor(void *arg){
 	struct Atendedores atendedor = *(struct Atendedores *)arg;
 	int posicion = 0, tipoAtencion = 0, tiempoAtencion = 0;
+	char identificador[30], mensaje[200], identificador2[30], mensaje2[200];
+	strcpy(identificador, "Atendedor_");
+	creaIdentificador(identificador, atendedor.ID);
+	//Escribimos de que tipo de atendedor se trata
+	if(atendedor.tipo == 1){
+		strcpy(mensaje, "es un atendedor de invitaciones.");
+		pthread_mutex_lock(&mutexLogs);
+		writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+	}else if(atendedor.tipo == 2){
+		strcpy(mensaje, "es un atendedor de codigos QR.");
+		pthread_mutex_lock(&mutexLogs);
+		writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+	}else{
+		strcpy(mensaje, "es un atendedor PRO.");
+		pthread_mutex_lock(&mutexLogs);
+		writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+	}
+	//Comienzan a buscar solicitudes
 	do{
 		pthread_mutex_lock(&mutexSolicitudes);
 		//busco una solicitud de su tipo para atender
 		posicion = buscarSolicitud(atendedor.tipo);
 		//Si ha encontrado alguna la atiendo
 		if(posicion != -1){
+			//Cambiamos el flag de atendido a 1
 			colaSolicitudes[posicion].atendido = 1;
-			printf("Atendedor_%d esta atendiendo a la solicitud %d\n",atendedor.ID,colaSolicitudes[posicion].ID);
+			//Escribimos en el log	
+			strcpy(identificador2, "solicitud_");
+			creaIdentificador(identificador2, colaSolicitudes[posicion].ID);
+			sprintf(mensaje, "%s%s.", "esta atendiendo a la ",identificador2);
+			pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+			pthread_mutex_unlock(&mutexLogs);
+			printf("%s: %s\n",identificador, mensaje);
 		}
 		pthread_mutex_unlock(&mutexSolicitudes);
 		if(posicion != -1){
@@ -406,35 +512,70 @@ void *accionesAtendedor(void *arg){
 			tipoAtencion = aleatorios(1, 100);
 			if (tipoAtencion <= 70){ //Atencion correcta
 				tiempoAtencion = aleatorios(1, 4);
+				//Escribimos en el log	
+				sprintf(mensaje2, "%s%s.", "ha dado un tipo de atencion CORRECTA a la ",identificador2);
 			}
 			else if (tipoAtencion > 70 && tipoAtencion <= 90){ //Errores en datos personales
 				tiempoAtencion = aleatorios(2, 6);
+				sprintf(mensaje2, "%s%s.", "ha dado un tipo de atencion CON ERRORES EN LOS DATOS PERSONALES a la ",identificador2);
 			}
 			else{ //Antecedentes
 				tiempoAtencion = aleatorios(6, 10);
+				sprintf(mensaje2, "%s%s,%s.", "ha dado un tipo de atencion CON ANTECEDENTES a la ",identificador2," y será descartada");
 			}
 			//Dormimos el tiempo de atencion
 			sleep(tiempoAtencion);
+			//Escribimos en el log	
+			sprintf(mensaje, "%s%s.", "ha terminado de atender a la ",identificador2);
+			pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+			writeLogMessage(identificador, mensaje2);
+			pthread_mutex_unlock(&mutexLogs);
+			printf("%s: %s\n",identificador, mensaje);
+			printf("%s: %s\n",identificador, mensaje2);
 			//Cambiamos el flag de atendido
 			pthread_mutex_lock(&mutexSolicitudes);
-			printf("Atendedor_%d ha atendido a la solicitud %d\n",atendedor.ID,colaSolicitudes[posicion].ID);
 				//Si tenia antecedentes se cambia el flag a 4 y se apunta en el log
 				if(tipoAtencion > 90){
-					printf("Atendedor_%d ha descartado por antecedentes a %d\n",atendedor.ID,colaSolicitudes[posicion].ID);
 					colaSolicitudes[posicion].atendido = 4;
 				//Si no tenia antecedentes se cambia el flag a 2 y se apunta en el log
 				}else{
-					printf("Atendedor_%d ha atendido a %d sin antecedentes\n",atendedor.ID,colaSolicitudes[posicion].ID);
 					colaSolicitudes[posicion].atendido = 2;
 				}
 			pthread_mutex_unlock(&mutexSolicitudes);
 			//Miramos si necesita tomar cafe
 			if (atendedor.solicitudesAtendidas == 5){
+				strcpy(mensaje, "se va a tomar cafe.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				printf("%s: %s\n",identificador, mensaje);
 				sleep(10);
 				atendedor.solicitudesAtendidas = 0;
+				strcpy(mensaje, "ha vuelto de su descanso.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				printf("%s: %s\n",identificador, mensaje);
 			}
 		}
 		//Si no hay usuarios espero 1 segundo y vuelvo a buscar la primera solicitud
 		sleep(1);
 	}while(1);
+}
+
+void writeLogMessage(char *id, char *msg) {
+ // Calculamos la hora actual
+	time_t now = time(0);
+	struct tm *tlocal = localtime(&now);
+	char stnow[19];
+	strftime(stnow, 19, "%d/%m/%y %H:%M:%S", tlocal);
+	// Escribimos en el log
+	logFile = fopen("registroTiempos.txt", "a");
+	fprintf(logFile, "[%s] %s: %s\n", stnow, id, msg);
+	fclose(logFile);
+ }
+
+void creaIdentificador(char *identificador, int numero){
+	sprintf(identificador, "%s%d",identificador, numero);
 }
