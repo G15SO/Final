@@ -78,7 +78,7 @@ int main(int argc, char argv[]){
 	//Creacion e inicializacion de los atendedores
 	pthread_t atendedorIn, atendedorQR, atendedorPro, coordinador;
 	for(i = 0; i < 3; i++){
-		atendedores[i].tipo = i;
+		atendedores[i].tipo = i+1;
 		atendedores[i].ID = i+1;
 		atendedores[i].solicitudesAtendidas = 0;
 	}
@@ -126,8 +126,8 @@ int main(int argc, char argv[]){
 	pthread_create(&atendedorQR, NULL, accionesAtendedor, (void *)&atendedores[1]);
 	pthread_create(&atendedorPro, NULL, accionesAtendedor, (void *)&atendedores[2]);
 	pthread_create(&coordinador, NULL, accionesCoordinadorSocial, NULL);
-	//espera infinita a señales
-	while (1){
+	//espera infinita a señales mientras no se termine la aplicacion
+	while (fin == 0){
 		pause();
 	}
 }
@@ -167,7 +167,7 @@ void manSolicitud(int sig){
 		colaSolicitudes[posicion].posicion = posicion;
 		pthread_create(&t1, NULL, accionesSolicitud, (void *)&colaSolicitudes[posicion].posicion);
 	}else{
-		printf("Señal ignorada por falta de espacio\n");
+		printf("APP: Señal ignorada por falta de espacio.\n");
 	}
 	pthread_mutex_unlock(&mutexSolicitudes);
 }
@@ -371,18 +371,30 @@ void manTerminacion(int sig)
 {
 	struct sigaction ss = {0};
 	ss.sa_handler = manFin;
-	if (sigaction(SIGUSR1, &ss, NULL) == -1)
-	{
-		perror("");
+	fin = 1;
+	//Codigo que ejecutare cuando el programa este terminandose
+	if (sigaction(SIGUSR1, &ss, NULL) == -1){
+		perror("Error en la llamada a sigaction");
 		exit(-1);
 	}
+	if (sigaction(SIGUSR2, &ss, NULL) == -1){
+		perror("Error en la llamada a sigaction");
+		exit(-1);
+	}
+	//Espera a que no queden solicitudes en la cola
+	while(solicitudesEncoladas != 0){
+		sleep(1);
+		solicitudesEncoladas;
+	}
+	//Salimos del programa con lo que terminaran todos sus hilos
+	exit(0);
 }
 
 /*
 *Funcion manejadora una vez iniciado al proceso de terminacion del programa para las señales SIGUSR1 y SIGUSR2
 */
 void manFin(int sig){
-	printf("señal no admitida\n");
+	printf("APP: No se admiten mas solicitudes porque el programa está terminando.\n");
 }
 
 /*
