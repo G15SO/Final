@@ -21,8 +21,7 @@ FILE *logFile;
 *sitio: vale 0 si en esa posicion de la cola no hay alguien sentado o 1 si si lo hay.
 *posicion: corresponde con la posicion que ocupa en la cola.
 */
-struct Solicitudes
-{
+struct Solicitudes{
 	int ID;
 	int atendido;
 	int tipo;
@@ -36,8 +35,7 @@ struct Solicitudes
 *tipo: corresponde con el tipo de de atendedor que es, 1 atendedor invitaciones, 2 atendedor QR, 3 atendedor PRO.
 *solicitudesAtendidas: corresponde con el numero de solicitudes que han atendido para tomar cafe.
 */
-struct Atendedores
-{
+struct Atendedores{
 	int ID;
 	int tipo;
 	int solicitudesAtendidas;
@@ -194,9 +192,10 @@ int encuentraSitio(){
 */
 void *accionesSolicitud(void *arg){
 	//Continua vale 0 si el hilo puede continuar o 1 si no puede.
-	int pos = *(int *)arg, continua, aleatorio, actividad = 0, ID;
+	int pos = *(int *)arg, continua, aleatorio, actividad = 0, ID, aux;
 	char identificador[30], mensaje[200];
 	ID = colaSolicitudes[pos].ID;
+	pos = colaSolicitudes[pos].posicion;
 	//Creamos mensajes de los logs
 	strcpy(identificador, "Solicitud_");
 	creaIdentificador(identificador, ID);
@@ -276,6 +275,7 @@ void *accionesSolicitud(void *arg){
 					//Se libera el espacio en la cola
 					pthread_mutex_lock(&mutexSolicitudes);
 					colaSolicitudes[pos].sitio = 0;
+					solicitudesEncoladas--;
 					pthread_mutex_unlock(&mutexSolicitudes);
 					strcpy(mensaje, "esta lista para comenzar la actividad.");
 					pthread_mutex_lock(&mutexLogs);
@@ -287,6 +287,10 @@ void *accionesSolicitud(void *arg){
 						pthread_cond_signal(&condCoordinador);
 					}
 					pthread_cond_wait(&condInicioActi, &mutexCultural);
+					//Si se le ha despertado para acabar se va
+					if(fin == 0){
+						pthread_exit(NULL);
+					}
 					if(contadorCultural == 4)
 						sleep(3);
 					contadorCultural--;
@@ -305,7 +309,10 @@ void *accionesSolicitud(void *arg){
 				}else{
 					pthread_mutex_unlock(&mutexCultural);
 					sleep(3);
-				}
+					if(fin == 1){
+						pthread_exit(NULL);
+					}
+				}	
 			}while (actividad == 0);
 		//Si es 1 el hilo no va a la actividad, libera su hueco en la cola y se va
 		}else{ 
@@ -316,16 +323,18 @@ void *accionesSolicitud(void *arg){
 			printf("%s: %s\n",identificador, mensaje);
 		}
 	}
-	strcpy(mensaje, " abandona el programa.");
-	pthread_mutex_lock(&mutexLogs);
-	writeLogMessage(identificador, mensaje);
-	pthread_mutex_unlock(&mutexLogs);
-	printf("%s: %s\n",identificador, mensaje);
-	pthread_mutex_lock(&mutexSolicitudes);
-	colaSolicitudes[pos].sitio = 0;
-	solicitudesEncoladas--;
-	pthread_mutex_unlock(&mutexSolicitudes);
-	pthread_exit(NULL);
+	if(fin == 0){
+		strcpy(mensaje, "abandona el programa.");
+		pthread_mutex_lock(&mutexLogs);
+		writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+		pthread_mutex_lock(&mutexSolicitudes);
+		colaSolicitudes[pos].sitio = 0;
+		solicitudesEncoladas--;
+		pthread_mutex_unlock(&mutexSolicitudes);
+		pthread_exit(NULL);
+	}
 }
 
 /*
@@ -338,6 +347,10 @@ void *accionesCoordinadorSocial(void *arg){
 		pthread_mutex_lock(&mutexCultural);
 		//Espera a que se le avise que son 4
 		pthread_cond_wait(&condCoordinador, &mutexCultural);
+		//Si se esta terminando el programa se elimina
+		if((fin == 1) && (contadorCultural == 0)){
+			pthread_exit(NULL);
+		}
 		//Cerramos la cola cultural con la variable candado
 		estadoCultural = 1;
 		//sleep de 1 segundo para dar tiempo a que el que ha avisado a el coordinador pueda entrar en el wait
@@ -367,9 +380,11 @@ void *accionesCoordinadorSocial(void *arg){
 /*
 *Funcion manejadora que termina correctamente el programa cuando recibe SIGINT
 */
-void manTerminacion(int sig)
-{
+void manTerminacion(int sig){
+	int i;
 	struct sigaction ss = {0};
+	char identificador[30], mensaje[200];
+	strcpy(identificador, "Solicitud_");
 	ss.sa_handler = manFin;
 	fin = 1;
 	//Codigo que ejecutare cuando el programa este terminandose
@@ -381,12 +396,66 @@ void manTerminacion(int sig)
 		perror("Error en la llamada a sigaction");
 		exit(-1);
 	}
-	//Espera a que no queden solicitudes en la cola
+	//Acabamos todos los hilos en las solicitudes una vez que han sido atendidos correctamente
 	while(solicitudesEncoladas != 0){
+		for(i = 0; i < 15; i++){
+			pthread_mutex_lock(&mutexSolicitudes);
+			if(colaSolicitudes[i].sitio == 1){
+				if(colaSolicitudes[i].atendido > 1){
+					colaSolicitudes[i].sitio = 0;
+					strcpy(identificador, "Solicitud_");
+					creaIdentificador(identificador, colaSolicitudes[i].ID);
+					strcpy(mensaje, "abandona el programa.");
+					pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+					pthread_mutex_unlock(&mutexLogs);
+					printf("%s: %s\n",identificador, mensaje);
+					solicitudesEncoladas--;
+				}
+			}
+			pthread_mutex_unlock(&mutexSolicitudes);
+		}
 		sleep(1);
-		solicitudesEncoladas;
 	}
+	//Terminanos actividad correctamente
+	if(estadoCultural == 0){
+		while(contadorCultural != 0){
+			for(i = 0; i < 4; i++){
+				pthread_mutex_lock(&mutexCultural);
+				if(colaCultural[i].sitio == 1){
+					if(colaCultural[i].atendido > 1){
+						colaCultural[i].sitio = 0;
+						strcpy(identificador, "Solicitud_");
+						creaIdentificador(identificador, colaCultural[i].ID);
+						strcpy(mensaje, "abandona el programa.");
+						pthread_mutex_lock(&mutexLogs);
+						writeLogMessage(identificador, mensaje);
+						pthread_mutex_unlock(&mutexLogs);
+						printf("%s: %s\n",identificador, mensaje);
+						contadorCultural--;
+					}
+				}
+				pthread_mutex_unlock(&mutexCultural);
+			}
+		sleep(1);
+		}
+	}else{
+		while(contadorCultural != 0){
+			sleep(1);
+		}
+		
+	}
+	//Se desbloque la condicion para poder eliminarla
+	pthread_cond_signal(&condCoordinador);
+	pthread_cond_destroy(&condCoordinador);
+	pthread_cond_broadcast(&condInicioActi);
+	pthread_cond_destroy(&condInicioActi);
+	//Eliminamos todo lo necesario
+	pthread_mutex_destroy(&mutexSolicitudes);
+	pthread_mutex_destroy(&mutexCultural);
+	pthread_mutex_destroy(&mutexLogs);
 	//Salimos del programa con lo que terminaran todos sus hilos
+	printf("---------------FIN DEL SERVICIO---------------\n");
 	exit(0);
 }
 
