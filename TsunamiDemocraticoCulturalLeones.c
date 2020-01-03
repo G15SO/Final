@@ -444,6 +444,7 @@ void *accionesCoordinadorSocial(void *arg){
 */
 void manMenu(int sig){
 int opcion, i, antiguo, totalAtendedores;
+char identificador[30], mensaje[200];
 pthread_t t1;
 	printf("-------ASIGNACIONES DINAMICAS-------\n");
 	printf("1) Reasignar solicitudes maximas\n");
@@ -466,11 +467,24 @@ pthread_t t1;
 			maxSolicitudes = opcion;
 			printf("--CAMBIO REALIZADO CON EXITO (%d)--\n", maxSolicitudes);
 			pthread_mutex_unlock(&mutexSolicitudes);
+			strcpy(identificador, "Solicitudes");
+			strcpy(mensaje, "El número de solicitudes ha sido actualizado.");
+			pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+			pthread_mutex_unlock(&mutexLogs);
+			
 		}else{
 			printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",colaSolicitudes[0].ID);
+			/**
+			strcpy(identificador, "Solicitudes");
+			strcpy(mensaje, "El número de solicitudes debe ser mayor que el ya fijado.");
+			pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+			pthread_mutex_unlock(&mutexLogs);
+			*/
 		}
 	}else if(opcion == 2){
-		printf("1) Modificar atendedores de INVITACIONES\n");
+		printf("1) Modificar atendedores de INVITACION\n");
 		printf("2) Modificar atendedores de QR\n");
 		printf("3) Modificar atendedores PRO\n");
 		scanf("%d",&opcion);
@@ -489,9 +503,23 @@ pthread_t t1;
 					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
 				}
 				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].ID);
+				/**
+				strcpy(identificador, "Atendedores");
+				strcpy(mensaje, "El número de atendedores de invitacion ha sido actualizado.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				*/
 				
 			}else{
 				printf("--EL NUEVO NUMERO DE ATENDEDORES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].ID);
+				/**
+				strcpy(identificador, "Atendedores");
+				strcpy(mensaje, "El número de atendedores de invitacion debe ser mayor que el ya fijado.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				*/
 			}	
 		}else if(opcion == 2){
 			printf("Introduce el nuevo numero de atendedores de QR:\n");
@@ -508,8 +536,22 @@ pthread_t t1;
 					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
 				}
 				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].tipo);
+				/**
+				strcpy(identificador, "Atendedores");
+				strcpy(mensaje, "El número de atendedores de QR se ha actualizado.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				*/
 			}else{
 				printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].tipo);
+				/**
+				strcpy(identificador, "Solciitudes");
+				strcpy(mensaje, "El número de atendedores de QR debe ser mayor que el ya fijado.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				*/
 			}
 		}else if(opcion == 3){
 			printf("Introduce el nuevo numero de atendedores PRO:\n");
@@ -526,8 +568,23 @@ pthread_t t1;
 					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
 				}
 				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].solicitudesAtendidas);
+				/**
+				strcpy(identificador, "Atendedores");
+				strcpy(mensaje, "El número de atendedores PRO se ha actualizado.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				*/
 			}else{
 				printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].solicitudesAtendidas);
+				/**
+				strcpy(identificador, "Solicitudes");
+				strcpy(mensaje, "El número de solicitudes debe ser mayor que el ya fijado.");
+				pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				*/
+				
 			}
 		}else{
 			printf("--OPCION INCORRECTA--\n");	
