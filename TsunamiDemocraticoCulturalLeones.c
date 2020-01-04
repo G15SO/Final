@@ -8,11 +8,29 @@
 #include <string.h>
 #include <time.h>
 
-
+//Mutex y variables condicion
 pthread_mutex_t mutexSolicitudes, mutexCultural, mutexLogs;
 pthread_cond_t condCoordinador, condInicioActi;
+
+/*
+* ->Hemos utilizado dos variables para los contadores de las colas, ya que aunque podría haberse usado una funcion que determine el numero
+* de solicitudes que se encuentran en cada cola, esta seria un algoritmo de complejidad n que deberia de recorrer la cola numerosas veces por
+* ejecucion y esto seria menos eficiente<-
+*
+* contadorSolicitudes: contador utilizado para fijar el identificador de las nuevas solicitudes, teniendo el cuenta el numero de ellas
+*	que el programa ya ha recibido.
+* contadorCultural: contador utilizado para conocer el numero de solicitudes que se encuentran en la cola cultural.
+* solicitudesEncoladas: contador utilizado para conocer el numero de solicitudes que se encuentran en la cola de solicitudes.
+* fin: variable que utilizada al acabar el programa que vale 0 si no se esta acabando o 1 si se ha recibido sigint y modifica el flujo
+*	del programa para que no se solicite entrar en una actividad cultural
+* estadoCultural: variable que vale 0 si la cola cultural esta abierta o 1 si esta cerrado porque una actividad esta en curso.
+* maxSolicitudes: variable que representa el numero maximo de solicitudes que el programa puede encolar, y puede ser modificado dinamicamente.
+*/
 int contadorSolicitudes, contadorCultural, solicitudesEncoladas, fin, estadoCultural, maxSolicitudes;
+
+//Fichero para los logs
 FILE *logFile;
+
 /*
 *Structura que emula una solicitud a la aplicacion.
 *ID: corresponde con el ID que tendra en la aplicacion.
@@ -41,27 +59,34 @@ struct Atendedores{
 	int solicitudesAtendidas;
 };
 
-//Cola de solicitudes
+//Cola de solicitudes.
 struct Solicitudes *colaSolicitudes;
-//Cola de solicitudes en la actividad cultural
+
+//Cola de solicitudes en la actividad cultural.
 struct Solicitudes colaCultural[4];
-//Lista con los atendedores
+
+/*
+*Lista de atendedores.
+*->Para evitar crear 3 nuevas variables globales necesarias para conocer el numero de atendedores ya existentes para la modificacion dinamica
+* de los atendedores, hemos utilizado un chivato aumentando la cola en una posicion extra(0), y guardando en ella el numero de atendedores de 
+* cada tipo existentes, ID = invitacion, tipo = QR, solicitudesAtendidas = PRO, asi evitamos tres nuevas variables globales.<-
+*/
 struct Atendedores *atendedores;
 
 //Declaracion de las funciones utilizadas.
-int aleatorios(int min, int max);
 void manSolicitud(int sig);
-void manTerminacion(int sig);
-void *accionesAtendedor(void *arg);
-void *accionesCoordinadorSocial(void *arg);
-void *accionesSolicitud(void *arg);
 int encuentraSitio();
-void manFin(int sig);
-void manMenu(int sig);
+void *accionesSolicitud(void *arg);
+void *accionesCoordinadorSocial(void *arg);
+void *accionesAtendedor(void *arg);
 int buscarSolicitud(int tipoAtendedor);
 int buscaMasAntigua(int *solicitudes, int contador);
+void manTerminacion(int sig);
+void manFin(int sig);
+void manMenu(int sig);
 void creaIdentificador(char *id, int num);
 void writeLogMessage(char *id, char *msg);
+int aleatorios(int min, int max);
 
 //Funcion principal
 int main(int argc, char *argv[]){
@@ -96,9 +121,7 @@ int main(int argc, char *argv[]){
 	pthread_mutex_init(&mutexLogs, NULL);
 	pthread_cond_init(&condCoordinador, NULL);
 	pthread_cond_init(&condInicioActi, NULL);
-	/*Inicializacion de las posiciones 0 de las colas en la que estara reflejado
-	* el numero de atendedores o de solicitudes que tiene el programa.
-	*/
+	//Inicializacion de las posiciones 0 de las colas en la que estara reflejado el numero de atendedores
 	atendedores[0].ID = 1;
 	atendedores[0].tipo = 1;
 	atendedores[0].solicitudesAtendidas = numAtendedores - 3;
@@ -154,6 +177,7 @@ int main(int argc, char *argv[]){
 		perror("Error\n");
 		exit(-1);
 	}
+	//Tratamiento de SIGPIPE para desplegar el menu de modificaciones dinamicas
 	ss3.sa_handler = manMenu;
 	if (sigaction(SIGPIPE, &ss3, NULL) == -1){
 		perror("Error\n");
@@ -174,18 +198,12 @@ int main(int argc, char *argv[]){
 }
 
 /*
-*Funcion que genera un numero aleatorio en el rango min = minimo, max = maximo
-*/
-int aleatorios(int min, int max){
-	return rand() % (max - min + 1) + min;
-}
-
-/*
-*Funcion manejadora de SIGUSR1 y SIGURS2 que crea una gestiona las nuevas solicitudes en el programa,
+*Funcion manejadora de SIGUSR1 y SIGURS2 que gestiona las nuevas solicitudes en el programa,
 *si hay espacion en la cola crea una un nuevo hilo para esa solicitud, si no hay espacio en la cola ignora la señal.
 */
 void manSolicitud(int sig){
 	pthread_t t1;
+	char identificador[30], mensaje[200];
 	int posicion = 0, signal = -1;
 	if (sig == SIGUSR1){
 		signal = 1;
@@ -208,7 +226,12 @@ void manSolicitud(int sig){
 		colaSolicitudes[posicion].posicion = posicion;
 		pthread_create(&t1, NULL, accionesSolicitud, (void *)&colaSolicitudes[posicion].posicion);
 	}else{
-		printf("APP: Señal ignorada por falta de espacio.\n");
+		strcpy(identificador, "APP");
+		strcpy(mensaje, "señal ignorada por falta de espacio.");
+		pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
 	}
 	pthread_mutex_unlock(&mutexSolicitudes);
 }
@@ -250,7 +273,7 @@ void *accionesSolicitud(void *arg){
 	printf("%s: \x1b[32m%s \x1b[37m\n",identificador, mensaje);
 	//Cogemos el mutex de los logs y escribimos en el fichero
 	pthread_mutex_lock(&mutexLogs);
-	writeLogMessage(identificador, mensaje);
+		writeLogMessage(identificador, mensaje);
 	pthread_mutex_unlock(&mutexLogs);
 	//Dormimos 4 segundos antes de comprobar si hemos sido atendidos
 	sleep(4);
@@ -281,22 +304,22 @@ void *accionesSolicitud(void *arg){
 			if (continua == 1){
 				printf("%s: \x1b[31m%s \x1b[37m\n", identificador, mensaje);
 				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
+					writeLogMessage(identificador, mensaje);
 				pthread_mutex_unlock(&mutexLogs);
 				pthread_mutex_lock(&mutexSolicitudes);
-				colaSolicitudes[pos].sitio = 0;
-				solicitudesEncoladas--;
+					colaSolicitudes[pos].sitio = 0;
+					solicitudesEncoladas--;
 				pthread_mutex_unlock(&mutexSolicitudes);
 				pthread_exit(NULL);
 			}
 			sleep(4);
-		} while(colaSolicitudes[pos].atendido == 0);
+		}while(colaSolicitudes[pos].atendido == 0);
 	}
 	//Espera a que le hayan atendido y comprueba si ha sido atendido correctamente
 	while (colaSolicitudes[pos].atendido == 1){
 		sleep(3);
 	}
-	//Si ha sido atendido es decir 2 decide si va o no a una actividad
+	//Si ha sido atendido correctamente es decir "2", y si no se esta terminando el proceso, decide si va o no a una actividad
 	if((colaSolicitudes[pos].atendido == 2) && (fin == 0)){
 		aleatorio = aleatorios(1, 100);
 		//Decide si va a la actividad o no
@@ -317,32 +340,34 @@ void *accionesSolicitud(void *arg){
 					contadorCultural++;
 					//Se libera el espacio en la cola
 					pthread_mutex_lock(&mutexSolicitudes);
-					colaSolicitudes[pos].sitio = 0;
-					solicitudesEncoladas--;
+						colaSolicitudes[pos].sitio = 0;
+						solicitudesEncoladas--;
 					pthread_mutex_unlock(&mutexSolicitudes);
 					strcpy(mensaje, "esta lista para comenzar la actividad.");
 					pthread_mutex_lock(&mutexLogs);
-					writeLogMessage(identificador, mensaje);
+						writeLogMessage(identificador, mensaje);
 					pthread_mutex_unlock(&mutexLogs);
-					printf("%s \x1b[34m%s \x1b[37m\n",identificador, mensaje);
+					printf("%s: \x1b[34m%s \x1b[37m\n",identificador, mensaje);
 					//Si es el 4 hilo avisa al coordinador de que empiece la actividad
 					if (contadorCultural == 4){
 						pthread_cond_signal(&condCoordinador);
 					}
 					pthread_cond_wait(&condInicioActi, &mutexCultural);
-					//Si se le ha despertado para acabar se va
+					//Si se le ha despertado para acabar el proceso se va
 					if((fin == 1) && (estadoCultural == 0)){
 						pthread_mutex_unlock(&mutexCultural);
 						pthread_exit(NULL);
 					}
-					if(contadorCultural == 4)
+					//Solamente dormira 3 segundos la primera solicitudes despertada, para evitar que la actividad dure 12
+					if(contadorCultural == 4){
 						sleep(3);
+					}
 					contadorCultural--;
 					colaCultural[contadorCultural].sitio = 0;
 					//Si es el ultimo avisa al coordinador de que se termino la actividad
 					strcpy(mensaje, "ha terminado la actividad.");
 					pthread_mutex_lock(&mutexLogs);
-					writeLogMessage(identificador, mensaje);
+						writeLogMessage(identificador, mensaje);
 					pthread_mutex_unlock(&mutexLogs);
 					printf("%s: %s\n",identificador, mensaje);
 					if (contadorCultural == 0){
@@ -350,7 +375,7 @@ void *accionesSolicitud(void *arg){
 					}
 					strcpy(mensaje, "abandona el programa.");
 					pthread_mutex_lock(&mutexLogs);
-					writeLogMessage(identificador, mensaje);
+						writeLogMessage(identificador, mensaje);
 					pthread_mutex_unlock(&mutexLogs);
 					printf("%s: \x1b[31m%s \x1b[37m\n",identificador, mensaje);
 					pthread_mutex_unlock(&mutexCultural);
@@ -359,6 +384,7 @@ void *accionesSolicitud(void *arg){
 				}else{
 					pthread_mutex_unlock(&mutexCultural);
 					sleep(3);
+					//Si cuando lo quiere volver a intentar el proceso esta terminanado, se va.
 					if(fin == 1){
 						pthread_exit(NULL);
 					}
@@ -368,18 +394,18 @@ void *accionesSolicitud(void *arg){
 		}else{ 
 			strcpy(mensaje, "ha decidido no unirse a una actividad.");
 			pthread_mutex_lock(&mutexLogs);
-			writeLogMessage(identificador, mensaje);
+				writeLogMessage(identificador, mensaje);
 			pthread_mutex_unlock(&mutexLogs);
 			printf("%s: %s\n",identificador, mensaje);	
 			//Se termima el hilo
 			strcpy(mensaje, "abandona el programa.");
 			pthread_mutex_lock(&mutexLogs);
-			writeLogMessage(identificador, mensaje);
+				writeLogMessage(identificador, mensaje);
 			pthread_mutex_unlock(&mutexLogs);
 			printf("%s: \x1b[31m%s \x1b[37m\n",identificador, mensaje);
 			pthread_mutex_lock(&mutexSolicitudes);
-			colaSolicitudes[pos].sitio = 0;
-			solicitudesEncoladas--;
+				colaSolicitudes[pos].sitio = 0;
+				solicitudesEncoladas--;
 			pthread_mutex_unlock(&mutexSolicitudes);
 			pthread_exit(NULL);
 		}
@@ -388,12 +414,12 @@ void *accionesSolicitud(void *arg){
 	if(fin == 0){
 		strcpy(mensaje, "abandona el programa.");
 		pthread_mutex_lock(&mutexLogs);
-		writeLogMessage(identificador, mensaje);
+			writeLogMessage(identificador, mensaje);
 		pthread_mutex_unlock(&mutexLogs);
 		printf("%s: \x1b[31m%s \x1b[37m\n",identificador, mensaje);
 		pthread_mutex_lock(&mutexSolicitudes);
-		colaSolicitudes[pos].sitio = 0;
-		solicitudesEncoladas--;
+			colaSolicitudes[pos].sitio = 0;
+			solicitudesEncoladas--;
 		pthread_mutex_unlock(&mutexSolicitudes);
 		pthread_exit(NULL);		
 	}
@@ -409,7 +435,7 @@ void *accionesCoordinadorSocial(void *arg){
 		pthread_mutex_lock(&mutexCultural);
 		//Espera a que se le avise que son 4
 		pthread_cond_wait(&condCoordinador, &mutexCultural);
-		//Si se esta terminando el programa se elimina
+		//Si se esta terminando el proceso se elimina
 		if((fin == 1) && (contadorCultural == 0)){
 			pthread_exit(NULL);
 		}
@@ -420,10 +446,13 @@ void *accionesCoordinadorSocial(void *arg){
 		//Escribimos en el log que comienza la actividad
 		strcpy(mensaje, "comienza la actividad cultural.");
 		pthread_mutex_lock(&mutexLogs);
-		writeLogMessage(identificador, mensaje);
+			writeLogMessage(identificador, mensaje);
 		pthread_mutex_unlock(&mutexLogs);
 		printf("%s: \x1b[33m%s \x1b[37m\n",identificador, mensaje);
-		//Avisa de que ya esta listo
+		/*
+		*Se avisa que ya esta listo, utilazamos un broadcast, en vez de signal, ya que debido a que estan esperando mas de un hilo, 
+		*el wait solo despertara a uno de ellos, mientras que broadcast despertara a los 4.
+		*/
 		pthread_cond_broadcast(&condInicioActi); 
 		//Espera a que termine la actividad
 		pthread_cond_wait(&condCoordinador, &mutexCultural);
@@ -432,7 +461,7 @@ void *accionesCoordinadorSocial(void *arg){
 		//Escribimos en el log que la actividad cultural ha terminado
 		strcpy(mensaje, "la actividad cultural ha terminado.");
 		pthread_mutex_lock(&mutexLogs);
-		writeLogMessage(identificador, mensaje);
+			writeLogMessage(identificador, mensaje);
 		pthread_mutex_unlock(&mutexLogs);
 		printf("%s: \x1b[33m%s \x1b[37m\n",identificador, mensaje);
 		pthread_mutex_unlock(&mutexCultural);
@@ -440,254 +469,111 @@ void *accionesCoordinadorSocial(void *arg){
 }
 
 /*
-*Funcion para desplegar un menu y realizar asignaciones dinamicas.
+*Funcion que emula el comportamiento de un atendedor, que infinitamente comprueba si hay solicitudes para atender
+*y las otorga un tipo de atencion especifico.
 */
-void manMenu(int sig){
-int opcion, i, antiguo, totalAtendedores;
-char identificador[30], mensaje[200];
-pthread_t t1;
-	printf("-------ASIGNACIONES DINAMICAS-------\n");
-	printf("1) Reasignar solicitudes maximas\n");
-	printf("2) Reasignar atendedores\n");
-	scanf("%d",&opcion);
-	if(opcion == 1){
-		printf("Introduce el nuevo numero maximo de solicitudes:\n");
-		scanf("%d",&opcion);
-		if(opcion > maxSolicitudes){
-			antiguo = maxSolicitudes;
-			pthread_mutex_lock(&mutexSolicitudes);
-			colaSolicitudes = realloc((struct Solicitudes *)colaSolicitudes,(opcion*sizeof(struct Solicitudes)));
-			for(i = antiguo; i < opcion; i++){
-				colaSolicitudes[i].ID = 0;
-				colaSolicitudes[i].tipo = 0;
-				colaSolicitudes[i].atendido = 0;
-				colaSolicitudes[i].sitio = 0;
-				colaSolicitudes[i].posicion = 0;
+void *accionesAtendedor(void *arg){
+	struct Atendedores atendedor = *(struct Atendedores *)arg;
+	int posicion = 0, tipoAtencion = 0, tiempoAtencion = 0;
+	char identificador[30], mensaje[200], identificador2[30], mensaje2[200];
+	strcpy(identificador, "Atendedor_");
+	creaIdentificador(identificador, atendedor.ID);
+	//Escribimos de que tipo de atendedor se trata
+	if(atendedor.tipo == 1){
+		strcpy(mensaje, "es un atendedor de invitaciones.");
+		pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+	}else if(atendedor.tipo == 2){
+		strcpy(mensaje, "es un atendedor de codigos QR.");
+		pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+	}else{
+		strcpy(mensaje, "es un atendedor PRO.");
+		pthread_mutex_lock(&mutexLogs);
+			writeLogMessage(identificador, mensaje);
+		pthread_mutex_unlock(&mutexLogs);
+		printf("%s: %s\n",identificador, mensaje);
+	}
+	//Comienzan a buscar solicitudes infinitamente
+	do{
+		pthread_mutex_lock(&mutexSolicitudes);
+		//busco una solicitud de su tipo para atender
+		posicion = buscarSolicitud(atendedor.tipo);
+		//Si ha encontrado alguna se atiende
+		if(posicion != -1){
+			//Cambiamos el flag de atendido a 1
+			colaSolicitudes[posicion].atendido = 1;
+			//Escribimos en el log	
+			strcpy(identificador2, "solicitud_");
+			creaIdentificador(identificador2, colaSolicitudes[posicion].ID);
+			sprintf(mensaje, "%s%s.", "esta atendiendo a la ",identificador2);
+			pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+			pthread_mutex_unlock(&mutexLogs);
+			printf("%s: %s\n",identificador, mensaje);
+		}
+		pthread_mutex_unlock(&mutexSolicitudes);
+		if(posicion != -1){
+			//Aumento de las solicitudes atendidas por el atendedor
+			atendedor.solicitudesAtendidas = atendedor.solicitudesAtendidas +1;
+			//Calculo el tipo de atencion y el tiempo de atencion
+			tipoAtencion = aleatorios(1, 100);
+			if (tipoAtencion <= 70){ //Atencion correcta
+				tiempoAtencion = aleatorios(1, 4);
+				//Escribimos en el log	
+				sprintf(mensaje2, "%s%s.", "ha dado un tipo de atencion CORRECTA a la ",identificador2);
 			}
-			maxSolicitudes = opcion;
-			printf("--CAMBIO REALIZADO CON EXITO (%d)--\n", maxSolicitudes);
+			else if (tipoAtencion > 70 && tipoAtencion <= 90){ //Errores en datos personales
+				tiempoAtencion = aleatorios(2, 6);
+				sprintf(mensaje2, "%s%s.", "ha dado un tipo de atencion CON ERRORES EN LOS DATOS PERSONALES a la ",identificador2);
+			}
+			else{ //Antecedentes
+				tiempoAtencion = aleatorios(6, 10);
+				sprintf(mensaje2, "%s%s,%s.", "ha dado un tipo de atencion CON ANTECEDENTES a la ",identificador2," y será descartada");
+			}
+			//Dormimos el tiempo de atencion
+			sleep(tiempoAtencion);
+			//Escribimos en el log	
+			sprintf(mensaje, "%s%s.", "ha terminado de atender a la ",identificador2);
+			pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+				writeLogMessage(identificador, mensaje2);
+			pthread_mutex_unlock(&mutexLogs);
+			printf("%s: %s\n",identificador, mensaje);
+			printf("%s: %s\n",identificador, mensaje2);
+			//Cambiamos el flag de atendido
+			pthread_mutex_lock(&mutexSolicitudes);
+				//Si tenia antecedentes se cambia el flag a 4 y se apunta en el log
+				if(tipoAtencion > 90){
+					colaSolicitudes[posicion].atendido = 4;
+				//Si no tenia antecedentes se cambia el flag a 2 y se apunta en el log
+				}else{
+					colaSolicitudes[posicion].atendido = 2;
+				}
 			pthread_mutex_unlock(&mutexSolicitudes);
-			strcpy(identificador, "Solicitudes");
-			strcpy(mensaje, "El número de solicitudes ha sido actualizado.");
-			pthread_mutex_lock(&mutexLogs);
-			writeLogMessage(identificador, mensaje);
-			pthread_mutex_unlock(&mutexLogs);
-			
-		}else{
-			printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",colaSolicitudes[0].ID);
-			/**
-			strcpy(identificador, "Solicitudes");
-			strcpy(mensaje, "El número de solicitudes debe ser mayor que el ya fijado.");
-			pthread_mutex_lock(&mutexLogs);
-			writeLogMessage(identificador, mensaje);
-			pthread_mutex_unlock(&mutexLogs);
-			*/
-		}
-	}else if(opcion == 2){
-		printf("1) Modificar atendedores de INVITACION\n");
-		printf("2) Modificar atendedores de QR\n");
-		printf("3) Modificar atendedores PRO\n");
-		scanf("%d",&opcion);
-		if(opcion == 1){
-			printf("Introduce el nuevo numero de atendedores de INVITACION\n");
-			scanf("%d",&opcion);
-			if(opcion > atendedores[0].ID){
-				antiguo = atendedores[0].ID+atendedores[0].tipo+atendedores[0].solicitudesAtendidas;
-				totalAtendedores = opcion+atendedores[0].tipo+atendedores[0].solicitudesAtendidas;
-				atendedores[0].ID = opcion;
-				atendedores = realloc((struct Atendedores *)atendedores, (totalAtendedores+1)*sizeof(struct Atendedores));
-				for(i = antiguo+1; i<=totalAtendedores;i++){
-					atendedores[i].tipo = 1;
-					atendedores[i].ID = i;
-					atendedores[i].solicitudesAtendidas = 0;
-					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
-				}
-				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].ID);
-				/**
-				strcpy(identificador, "Atendedores");
-				strcpy(mensaje, "El número de atendedores de invitacion ha sido actualizado.");
+			//Miramos si necesita tomar cafe
+			if (atendedor.solicitudesAtendidas == 5){
+				strcpy(mensaje, "se va a tomar cafe.");
 				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				*/
-				
-			}else{
-				printf("--EL NUEVO NUMERO DE ATENDEDORES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].ID);
-				/**
-				strcpy(identificador, "Atendedores");
-				strcpy(mensaje, "El número de atendedores de invitacion debe ser mayor que el ya fijado.");
-				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				*/
-			}	
-		}else if(opcion == 2){
-			printf("Introduce el nuevo numero de atendedores de QR:\n");
-			scanf("%d",&opcion);
-			if(opcion > atendedores[0].tipo){
-				antiguo = atendedores[0].ID+atendedores[0].tipo+atendedores[0].solicitudesAtendidas;
-				totalAtendedores = opcion+atendedores[0].ID+atendedores[0].solicitudesAtendidas;
-				atendedores[0].tipo = opcion;
-				atendedores = realloc((struct Atendedores *)atendedores, (totalAtendedores+1)*sizeof(struct Atendedores));
-				for(i = antiguo+1; i<=totalAtendedores;i++){
-					atendedores[i].tipo = 2;
-					atendedores[i].ID = i;
-					atendedores[i].solicitudesAtendidas = 0;
-					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
-				}
-				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].tipo);
-				/**
-				strcpy(identificador, "Atendedores");
-				strcpy(mensaje, "El número de atendedores de QR se ha actualizado.");
-				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				*/
-			}else{
-				printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].tipo);
-				/**
-				strcpy(identificador, "Solciitudes");
-				strcpy(mensaje, "El número de atendedores de QR debe ser mayor que el ya fijado.");
-				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				*/
-			}
-		}else if(opcion == 3){
-			printf("Introduce el nuevo numero de atendedores PRO:\n");
-			scanf("%d",&opcion);
-			if(opcion > atendedores[0].solicitudesAtendidas){
-				antiguo = atendedores[0].ID + atendedores[0].tipo + atendedores[0].solicitudesAtendidas;
-				totalAtendedores = opcion + atendedores[0].ID + atendedores[0].tipo;
-				atendedores[0].solicitudesAtendidas = opcion;
-				atendedores = realloc((struct Atendedores *)atendedores, (totalAtendedores+1)*sizeof(struct Atendedores));
-				for(i = antiguo+1; i<=totalAtendedores;i++){
-					atendedores[i].tipo = 3;
-					atendedores[i].ID = i;
-					atendedores[i].solicitudesAtendidas = 0;
-					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
-				}
-				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].solicitudesAtendidas);
-				/**
-				strcpy(identificador, "Atendedores");
-				strcpy(mensaje, "El número de atendedores PRO se ha actualizado.");
-				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				*/
-			}else{
-				printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].solicitudesAtendidas);
-				/**
-				strcpy(identificador, "Solicitudes");
-				strcpy(mensaje, "El número de solicitudes debe ser mayor que el ya fijado.");
-				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				*/
-				
-			}
-		}else{
-			printf("--OPCION INCORRECTA--\n");	
-		}
-	}else{
-		printf("--OPCION INCORRECTA--\n");
-	}
-}
-
-/*
-*Funcion manejadora que termina correctamente el programa cuando recibe SIGINT
-*/
-void manTerminacion(int sig){
-	int i;
-	struct sigaction ss = {0};
-	char identificador[30], mensaje[200];
-	strcpy(identificador, "Solicitud_");
-	ss.sa_handler = manFin;
-	fin = 1;
-	//Codigo que ejecutare cuando el programa este terminandose
-	if (sigaction(SIGUSR1, &ss, NULL) == -1){
-		perror("Error en la llamada a sigaction");
-		exit(-1);
-	}
-	if (sigaction(SIGUSR2, &ss, NULL) == -1){
-		perror("Error en la llamada a sigaction");
-		exit(-1);
-	}
-	if (sigaction(SIGINT, &ss, NULL) == -1){
-		perror("Error en la llamada a sigaction");
-		exit(-1);
-	}
-	if (sigaction(SIGPIPE, &ss, NULL) == -1){
-		perror("Error en la llamada a sigaction");
-		exit(-1);
-	}
-	//Acabamos todos los hilos en las solicitudes una vez que han sido atendidos correctamente
-	while(solicitudesEncoladas != 0){
-		for(i = 0; i < maxSolicitudes; i++){
-			pthread_mutex_lock(&mutexSolicitudes);
-			if(colaSolicitudes[i].sitio == 1){
-				if(colaSolicitudes[i].atendido > 1){
-					colaSolicitudes[i].sitio = 0;
-					strcpy(identificador, "Solicitud_");
-					creaIdentificador(identificador, colaSolicitudes[i].ID);
-					strcpy(mensaje, "abandona el programa.");
-					pthread_mutex_lock(&mutexLogs);
 					writeLogMessage(identificador, mensaje);
-					pthread_mutex_unlock(&mutexLogs);
-					printf("%s: \x1b[31m%s \x1b[37m\n",identificador, mensaje);
-					solicitudesEncoladas--;
-				}
+				pthread_mutex_unlock(&mutexLogs);
+				printf("%s: %s\n",identificador, mensaje);
+				sleep(10);
+				atendedor.solicitudesAtendidas = 0;
+				strcpy(mensaje, "ha vuelto de su descanso.");
+				pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+				printf("%s: %s\n",identificador, mensaje);
 			}
-			pthread_mutex_unlock(&mutexSolicitudes);		
 		}
+		//Si no hay usuarios espero 1 segundo y vuelvo a buscar la primera solicitud
 		sleep(1);
-	}
-	//Terminanos actividad correctamente
-	if(estadoCultural == 0){
-		while(contadorCultural != 0){
-			for(i = 0; i < 4; i++){
-				pthread_mutex_lock(&mutexCultural);
-				if(colaCultural[i].sitio == 1){
-					colaCultural[i].sitio = 0;
-					strcpy(identificador, "Solicitud_");
-					creaIdentificador(identificador, colaCultural[i].ID);
-					strcpy(mensaje, "abandona el programa.");
-					pthread_mutex_lock(&mutexLogs);
-					writeLogMessage(identificador, mensaje);
-					pthread_mutex_unlock(&mutexLogs);
-					printf("%s: \x1b[31m%s \x1b[37m\n",identificador, mensaje);
-					contadorCultural--;
-				}
-				pthread_mutex_unlock(&mutexCultural);
-			}
-			sleep(1);
-		}
-	}else{
-		while(contadorCultural != 0){
-			sleep(1);
-		}	
-	}
-	//Se desbloque la condicion para poder eliminarla
-	pthread_cond_signal(&condCoordinador);
-	pthread_cond_destroy(&condCoordinador);
-	pthread_cond_broadcast(&condInicioActi);
-	pthread_cond_destroy(&condInicioActi);
-	//Eliminamos todo lo necesario
-	pthread_mutex_destroy(&mutexSolicitudes);
-	pthread_mutex_destroy(&mutexCultural);
-	pthread_mutex_destroy(&mutexLogs);
-	free(colaSolicitudes);
-	free(atendedores);
-	//Salimos del programa con lo que terminaran todos sus hilos
-	printf("---------------FIN DEL SERVICIO---------------\n");
-	exit(0);
-}
-
-/*
-*Funcion manejadora una vez iniciado al proceso de terminacion del programa para las señales SIGUSR1 y SIGUSR2
-*/
-void manFin(int sig){
-	printf("APP: No se admiten mas solicitudes porque el programa está terminando.\n");
+	}while(1);
 }
 
 /*
@@ -768,114 +654,228 @@ int buscaMasAntigua(int *solicitudes, int contador){
 }
 
 /*
-*Funcion que emula el comportamiento de un atendedor, que infinitamente comprueba si hay solicitudes para atender
-*y las otorga un tipo de atencion especifico.
+*Funcion para desplegar un menu y realizar asignaciones dinamicas.
 */
-void *accionesAtendedor(void *arg){
-	struct Atendedores atendedor = *(struct Atendedores *)arg;
-	int posicion = 0, tipoAtencion = 0, tiempoAtencion = 0;
-	char identificador[30], mensaje[200], identificador2[30], mensaje2[200];
-	strcpy(identificador, "Atendedor_");
-	creaIdentificador(identificador, atendedor.ID);
-	//Escribimos de que tipo de atendedor se trata
-	if(atendedor.tipo == 1){
-		strcpy(mensaje, "es un atendedor de invitaciones.");
-		pthread_mutex_lock(&mutexLogs);
-		writeLogMessage(identificador, mensaje);
-		pthread_mutex_unlock(&mutexLogs);
-		printf("%s: %s\n",identificador, mensaje);
-	}else if(atendedor.tipo == 2){
-		strcpy(mensaje, "es un atendedor de codigos QR.");
-		pthread_mutex_lock(&mutexLogs);
-		writeLogMessage(identificador, mensaje);
-		pthread_mutex_unlock(&mutexLogs);
-		printf("%s: %s\n",identificador, mensaje);
-	}else{
-		strcpy(mensaje, "es un atendedor PRO.");
-		pthread_mutex_lock(&mutexLogs);
-		writeLogMessage(identificador, mensaje);
-		pthread_mutex_unlock(&mutexLogs);
-		printf("%s: %s\n",identificador, mensaje);
-	}
-	//Comienzan a buscar solicitudes
-	do{
-		pthread_mutex_lock(&mutexSolicitudes);
-		//busco una solicitud de su tipo para atender
-		posicion = buscarSolicitud(atendedor.tipo);
-		//Si ha encontrado alguna la atiendo
-		if(posicion != -1){
-			//Cambiamos el flag de atendido a 1
-			colaSolicitudes[posicion].atendido = 1;
-			//Escribimos en el log	
-			strcpy(identificador2, "solicitud_");
-			creaIdentificador(identificador2, colaSolicitudes[posicion].ID);
-			sprintf(mensaje, "%s%s.", "esta atendiendo a la ",identificador2);
-			pthread_mutex_lock(&mutexLogs);
-			writeLogMessage(identificador, mensaje);
-			pthread_mutex_unlock(&mutexLogs);
-			printf("%s: %s\n",identificador, mensaje);
-		}
-		pthread_mutex_unlock(&mutexSolicitudes);
-		if(posicion != -1){
-			atendedor.solicitudesAtendidas = atendedor.solicitudesAtendidas +1;
-			//Calculo el tipo de atencion y el tiempo de atencion
-			tipoAtencion = aleatorios(1, 100);
-			if (tipoAtencion <= 70){ //Atencion correcta
-				tiempoAtencion = aleatorios(1, 4);
-				//Escribimos en el log	
-				sprintf(mensaje2, "%s%s.", "ha dado un tipo de atencion CORRECTA a la ",identificador2);
-			}
-			else if (tipoAtencion > 70 && tipoAtencion <= 90){ //Errores en datos personales
-				tiempoAtencion = aleatorios(2, 6);
-				sprintf(mensaje2, "%s%s.", "ha dado un tipo de atencion CON ERRORES EN LOS DATOS PERSONALES a la ",identificador2);
-			}
-			else{ //Antecedentes
-				tiempoAtencion = aleatorios(6, 10);
-				sprintf(mensaje2, "%s%s,%s.", "ha dado un tipo de atencion CON ANTECEDENTES a la ",identificador2," y será descartada");
-			}
-			//Dormimos el tiempo de atencion
-			sleep(tiempoAtencion);
-			//Escribimos en el log	
-			sprintf(mensaje, "%s%s.", "ha terminado de atender a la ",identificador2);
-			pthread_mutex_lock(&mutexLogs);
-			writeLogMessage(identificador, mensaje);
-			writeLogMessage(identificador, mensaje2);
-			pthread_mutex_unlock(&mutexLogs);
-			printf("%s: %s\n",identificador, mensaje);
-			printf("%s: %s\n",identificador, mensaje2);
-			//Cambiamos el flag de atendido
+void manMenu(int sig){
+int opcion, i, antiguo, totalAtendedores;
+char identificador[30], mensaje[200];
+pthread_t t1;
+	printf("\x1b[33m-------ASIGNACIONES DINAMICAS-------\x1b[37m\n");
+	printf("1) Reasignar solicitudes maximas\n");
+	printf("2) Reasignar atendedores\n");
+	scanf("%d",&opcion);
+	if(opcion == 1){
+		printf("Introduce el nuevo numero maximo de solicitudes:\n");
+		scanf("%d",&opcion);
+		if(opcion > maxSolicitudes){
+			antiguo = maxSolicitudes;
 			pthread_mutex_lock(&mutexSolicitudes);
-				//Si tenia antecedentes se cambia el flag a 4 y se apunta en el log
-				if(tipoAtencion > 90){
-					colaSolicitudes[posicion].atendido = 4;
-				//Si no tenia antecedentes se cambia el flag a 2 y se apunta en el log
-				}else{
-					colaSolicitudes[posicion].atendido = 2;
-				}
-			pthread_mutex_unlock(&mutexSolicitudes);
-			//Miramos si necesita tomar cafe
-			if (atendedor.solicitudesAtendidas == 5){
-				strcpy(mensaje, "se va a tomar cafe.");
-				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				printf("%s: %s\n",identificador, mensaje);
-				sleep(10);
-				atendedor.solicitudesAtendidas = 0;
-				strcpy(mensaje, "ha vuelto de su descanso.");
-				pthread_mutex_lock(&mutexLogs);
-				writeLogMessage(identificador, mensaje);
-				pthread_mutex_unlock(&mutexLogs);
-				printf("%s: %s\n",identificador, mensaje);
+			colaSolicitudes = realloc((struct Solicitudes *)colaSolicitudes,(opcion*sizeof(struct Solicitudes)));
+			for(i = antiguo; i < opcion; i++){
+				colaSolicitudes[i].ID = 0;
+				colaSolicitudes[i].tipo = 0;
+				colaSolicitudes[i].atendido = 0;
+				colaSolicitudes[i].sitio = 0;
+				colaSolicitudes[i].posicion = 0;
 			}
+			maxSolicitudes = opcion;
+			printf("--CAMBIO REALIZADO CON EXITO (%d)--\n", maxSolicitudes);
+			pthread_mutex_unlock(&mutexSolicitudes);
+			strcpy(identificador, "APP");
+			sprintf(mensaje, "%s (%d) -> (%d).", "el numero de solicitudes maximas ha sido modificado", antiguo, maxSolicitudes);
+			pthread_mutex_lock(&mutexLogs);
+				writeLogMessage(identificador, mensaje);
+			pthread_mutex_unlock(&mutexLogs);
+			
+		}else{
+			printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n", maxSolicitudes);
 		}
-		//Si no hay usuarios espero 1 segundo y vuelvo a buscar la primera solicitud
+	}else if(opcion == 2){
+		printf("1) Modificar atendedores de INVITACION\n");
+		printf("2) Modificar atendedores de QR\n");
+		printf("3) Modificar atendedores PRO\n");
+		scanf("%d",&opcion);
+		if(opcion == 1){
+			printf("Introduce el nuevo numero de atendedores de INVITACION\n");
+			scanf("%d",&opcion);
+			if(opcion > atendedores[0].ID){
+				antiguo = atendedores[0].ID+atendedores[0].tipo+atendedores[0].solicitudesAtendidas;
+				totalAtendedores = opcion+atendedores[0].tipo+atendedores[0].solicitudesAtendidas;
+				atendedores[0].ID = opcion;
+				atendedores = realloc((struct Atendedores *)atendedores, (totalAtendedores+1)*sizeof(struct Atendedores));
+				for(i = antiguo+1; i<=totalAtendedores;i++){
+					atendedores[i].tipo = 1;
+					atendedores[i].ID = i;
+					atendedores[i].solicitudesAtendidas = 0;
+					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
+				}
+				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].ID);
+				strcpy(identificador, "APP");
+				sprintf(mensaje, "%s (%d).", "el numero de atendedores de invitaciones ha sido modificado", opcion);
+				pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);				
+			}else{
+				printf("--EL NUEVO NUMERO DE ATENDEDORES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].ID);
+			}	
+		}else if(opcion == 2){
+			printf("Introduce el nuevo numero de atendedores de QR:\n");
+			scanf("%d",&opcion);
+			if(opcion > atendedores[0].tipo){
+				antiguo = atendedores[0].ID+atendedores[0].tipo+atendedores[0].solicitudesAtendidas;
+				totalAtendedores = opcion+atendedores[0].ID+atendedores[0].solicitudesAtendidas;
+				atendedores[0].tipo = opcion;
+				atendedores = realloc((struct Atendedores *)atendedores, (totalAtendedores+1)*sizeof(struct Atendedores));
+				for(i = antiguo+1; i<=totalAtendedores;i++){
+					atendedores[i].tipo = 2;
+					atendedores[i].ID = i;
+					atendedores[i].solicitudesAtendidas = 0;
+					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
+				}
+				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].tipo);
+				strcpy(identificador, "APP");
+				sprintf(mensaje, "%s (%d).", "el numero de atendedores de QR ha sido modificado", opcion);
+				pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+			}else{
+				printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].tipo);
+			}
+		}else if(opcion == 3){
+			printf("Introduce el nuevo numero de atendedores PRO:\n");
+			scanf("%d",&opcion);
+			if(opcion > atendedores[0].solicitudesAtendidas){
+				antiguo = atendedores[0].ID + atendedores[0].tipo + atendedores[0].solicitudesAtendidas;
+				totalAtendedores = opcion + atendedores[0].ID + atendedores[0].tipo;
+				atendedores[0].solicitudesAtendidas = opcion;
+				atendedores = realloc((struct Atendedores *)atendedores, (totalAtendedores+1)*sizeof(struct Atendedores));
+				for(i = antiguo+1; i<=totalAtendedores;i++){
+					atendedores[i].tipo = 3;
+					atendedores[i].ID = i;
+					atendedores[i].solicitudesAtendidas = 0;
+					pthread_create(&t1, NULL, accionesAtendedor, (void *)&atendedores[i]);
+				}
+				printf("--CAMBIO REALIZADO CON EXITO (%d)--\n",atendedores[0].solicitudesAtendidas);
+				strcpy(identificador, "APP");
+				sprintf(mensaje, "%s (%d).", "el numero de atendedores PRO ha sido modificado", opcion);
+				pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+				pthread_mutex_unlock(&mutexLogs);
+			}else{
+				printf("--EL NUEVO NUMERO DE SOLICITUDES DEBE DE SER MAYOR QUE EL YA FIJADO (%d)--\n",atendedores[0].solicitudesAtendidas);
+			}
+		}else{
+			printf("--OPCION INCORRECTA--\n");	
+		}
+	}else{
+		printf("--OPCION INCORRECTA--\n");
+	}
+}
+
+/*
+*Funcion manejadora que termina correctamente el programa cuando recibe SIGINT
+*/
+void manTerminacion(int sig){
+	int i;
+	struct sigaction ss = {0};
+	char identificador[30], mensaje[200];
+	strcpy(identificador, "Solicitud_");
+	ss.sa_handler = manFin;
+	fin = 1;
+	//Re-asignacion de manejadoras para no recibir mas señales
+	if (sigaction(SIGUSR1, &ss, NULL) == -1){
+		perror("Error en la llamada a sigaction");
+		exit(-1);
+	}
+	if (sigaction(SIGUSR2, &ss, NULL) == -1){
+		perror("Error en la llamada a sigaction");
+		exit(-1);
+	}
+	if (sigaction(SIGINT, &ss, NULL) == -1){
+		perror("Error en la llamada a sigaction");
+		exit(-1);
+	}
+	if (sigaction(SIGPIPE, &ss, NULL) == -1){
+		perror("Error en la llamada a sigaction");
+		exit(-1);
+	}
+	//Acabamos todos los hilos en las solicitudes una vez que han sido atendidos correctamente
+	while(solicitudesEncoladas != 0){
+		for(i = 0; i < maxSolicitudes; i++){
+			pthread_mutex_lock(&mutexSolicitudes);
+			if(colaSolicitudes[i].sitio == 1){
+				if(colaSolicitudes[i].atendido > 1){
+					colaSolicitudes[i].sitio = 0;
+					strcpy(identificador, "Solicitud_");
+					creaIdentificador(identificador, colaSolicitudes[i].ID);
+					strcpy(mensaje, "abandona el programa.");
+					pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+					pthread_mutex_unlock(&mutexLogs);
+					printf("%s: \x1b[31m%s \x1b[37m\n",identificador, mensaje);
+					solicitudesEncoladas--;
+				}
+			}
+			pthread_mutex_unlock(&mutexSolicitudes);		
+		}
 		sleep(1);
-	}while(1);
+	}
+	//Terminanos actividad correctamente
+	if(estadoCultural == 0){
+		while(contadorCultural != 0){
+			for(i = 0; i < 4; i++){
+				pthread_mutex_lock(&mutexCultural);
+				if(colaCultural[i].sitio == 1){
+					colaCultural[i].sitio = 0;
+					strcpy(identificador, "Solicitud_");
+					creaIdentificador(identificador, colaCultural[i].ID);
+					strcpy(mensaje, "abandona el programa.");
+					pthread_mutex_lock(&mutexLogs);
+					writeLogMessage(identificador, mensaje);
+					pthread_mutex_unlock(&mutexLogs);
+					printf("%s: \x1b[31m%s \x1b[37m\n",identificador, mensaje);
+					contadorCultural--;
+				}
+				pthread_mutex_unlock(&mutexCultural);
+			}
+			sleep(1);
+		}
+	}else{
+		while(contadorCultural != 0){
+			sleep(1);
+		}	
+	}
+	//Se desbloque la condicion para poder eliminarla
+	pthread_cond_signal(&condCoordinador);
+	pthread_cond_destroy(&condCoordinador);
+	pthread_cond_broadcast(&condInicioActi);
+	pthread_cond_destroy(&condInicioActi);
+	//Eliminamos todo lo necesario
+	pthread_mutex_destroy(&mutexSolicitudes);
+	pthread_mutex_destroy(&mutexCultural);
+	pthread_mutex_destroy(&mutexLogs);
+	free(colaSolicitudes);
+	free(atendedores);
+	//Salimos del programa con lo que terminaran todos sus hilos
+	printf("--------------------FIN DEL SERVICIO--------------------\n");
+	exit(0);
+}
+
+/*
+*Funcion manejadora una vez iniciado al proceso de terminacion del programa para las señales SIGUSR1 y SIGUSR2
+*/
+void manFin(int sig){
+	char identificador[30], mensaje[200];
+	printf("APP: No se admiten mas solicitudes porque el programa está terminando.\n");
+	strcpy(identificador, "APP");
+	strcpy(mensaje, "no se admiten mas señales porque el programa está terminanado.\n");
+	pthread_mutex_lock(&mutexLogs);
+		writeLogMessage(identificador, mensaje);
+	pthread_mutex_unlock(&mutexLogs);
 }
 
 void writeLogMessage(char *id, char *msg) {
- // Calculamos la hora actual
+ 	// Calculamos la hora actual
 	time_t now = time(0);
 	struct tm *tlocal = localtime(&now);
 	char stnow[19];
@@ -884,8 +884,16 @@ void writeLogMessage(char *id, char *msg) {
 	logFile = fopen("registroTiempos.txt", "a");
 	fprintf(logFile, "[%s] %s: %s\n", stnow, id, msg);
 	fclose(logFile);
- }
+}
 
+//Funcion que dado un identificador y un numbre los combina para hacer un identificador completo
 void creaIdentificador(char *identificador, int numero){
 	sprintf(identificador, "%s%d",identificador, numero);
+}
+
+/*
+*Funcion que genera un numero aleatorio en el rango min = minimo, max = maximo
+*/
+int aleatorios(int min, int max){
+	return rand() % (max - min + 1) + min;
 }
